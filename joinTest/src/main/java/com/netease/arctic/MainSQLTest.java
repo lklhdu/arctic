@@ -1,12 +1,15 @@
 package com.netease.arctic;
 
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.types.Row;
 
 public class MainSQLTest {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(8);
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
@@ -28,16 +31,20 @@ public class MainSQLTest {
         String s2 = "create table if not exists user_dim  (\n" +
             "optime TIMESTAMP(3),\n" +
             "WATERMARK FOR optime AS optime \n" +
-            ") LIKE c.upsertSpeedTest.hugeTestTable\n";
+            ") LIKE c.upsertSpeedTest.hugeTestTable";
         tableEnv.executeSql(s2);
         String s3 = "CREATE TABLE p (o_w_id int, o_d_id int, o_id int, c_w_id int, c_id int, c_credit string) " +
             "WITH ('connector'='blackhole')";
         tableEnv.executeSql(s3);
         String s4 = "SELECT o.o_w_id,o.o_d_id,o.o_id, user_dim.c_w_id, user_dim.c_id, user_dim.c_credit \n" +
             "FROM orders o \n" +
-            "LEFT JOIN user_dim /*+OPTIONS('streaming'='true','arctic.read.mode'='file','scan.startup.mode'='earliest', 'dim-table.enable'='true')*/ \n" +
+            "LEFT JOIN user_dim /*+OPTIONS('streaming'='true','arctic.read.mode'='file'," +
+            "'scan.startup.mode'='earliest', 'dim-table.enable'='true')*/ \n" +
             "FOR SYSTEM_TIME AS OF o.ts \n" +
             "ON o.o_w_id = user_dim.c_w_id and o.o_d_id=user_dim.c_d_id and o.o_id=user_dim.c_id";
-        tableEnv.sqlQuery(s4).execute().print();
+//        tableEnv.sqlQuery(s4).execute().print();
+        DataStream<Row> ds =tableEnv.toChangelogStream(tableEnv.sqlQuery(s4));
+        ds.addSink(new DiscardingSink<>()).disableChaining();
+        env.executeAsync("test");
     }
 }
