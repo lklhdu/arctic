@@ -337,10 +337,10 @@
                                         com.netease.arctic.shaded.org.apache.flink.streaming.util.serialization.TypeInformationKeyValueSerializationSchema
                                     </shadedPattern>
                                 </relocation>
-                                <relocation>
-                                    <pattern>org.apache.kafka</pattern>
-                                    <shadedPattern>com.netease.arctic.shaded.org.apache.kafka</shadedPattern>
-                                </relocation>
+<!--                                <relocation>-->
+<!--                                    <pattern>org.apache.kafka</pattern>-->
+<!--                                    <shadedPattern>com.netease.arctic.shaded.org.apache.kafka</shadedPattern>-->
+<!--                                </relocation>-->
                                 <relocation>
                                     <pattern>com.facebook.fb303</pattern>
                                     <shadedPattern>com.netease.arctic.shaded.com.facebook.fb303</shadedPattern>

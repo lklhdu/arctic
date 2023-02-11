@@ -33,7 +33,7 @@
         <module>optimizer</module>
         <module>flink</module>
         <module>spark</module>
-        <module>trino</module>
+<!--        <module>trino</module>-->
         <module>ams</module>
         <module>dist</module>
     </modules>
@@ -64,7 +64,7 @@
         <cglib.version>2.2.2</cglib.version>
         <mockito.version>2.23.4</mockito.version>
         <parquet.version>1.12.0</parquet.version>
-        <curator.version>5.2.1</curator.version>
+        <curator.version>2.10.0</curator.version>
         <zookeeper.version>3.7.1</zookeeper.version>
         <fastjson.version>1.2.75</fastjson.version>
     </properties>
