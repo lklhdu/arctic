@@ -27,6 +27,7 @@ import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
+import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.Input;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.Output;
@@ -63,6 +64,7 @@ public class ArcticWriter<OUT> extends AbstractStreamOperator<OUT>
     this.logWriter = logWriter;
     this.fileWriter = fileWriter;
     this.metricsGenerator = metricsGenerator;
+    this.chainingStrategy = ChainingStrategy.DEFAULT_CHAINING_STRATEGY;
   }
 
   @Override
