@@ -21,6 +21,7 @@ package com.netease.arctic.trino.keyed;
 import com.google.common.collect.ImmutableList;
 import com.netease.arctic.data.DataFileType;
 import com.netease.arctic.data.PrimaryKeyedFile;
+import com.netease.arctic.hive.io.reader.AdaptHiveArcticDeleteFilter;
 import com.netease.arctic.io.reader.ArcticDeleteFilter;
 import com.netease.arctic.scan.ArcticFileScanTask;
 import com.netease.arctic.table.MetadataColumns;
@@ -41,7 +42,6 @@ import io.trino.spi.connector.DynamicFilter;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeManager;
 import org.apache.iceberg.io.CloseableIterable;
-import org.jetbrains.annotations.Nullable;
 import org.joda.time.DateTimeZone;
 
 import java.io.IOException;
@@ -75,7 +75,7 @@ public class KeyedConnectorPageSource implements ConnectorPageSource {
   private DynamicFilter dynamicFilter;
   private TypeManager typeManager;
   private FileIoProvider fileIoProvider;
-  private ArcticDeleteFilter<TrinoRow> arcticDeleteFilter;
+  private AdaptHiveArcticDeleteFilter<TrinoRow> arcticDeleteFilter;
 
   private List<ColumnHandle> requireColumnsDummy;
   private Type[] requireColumnTypes;
@@ -98,7 +98,7 @@ public class KeyedConnectorPageSource implements ConnectorPageSource {
       DynamicFilter dynamicFilter,
       TypeManager typeManager,
       FileIoProvider fileIoProvider,
-      ArcticDeleteFilter<TrinoRow> arcticDeleteFilter) {
+      AdaptHiveArcticDeleteFilter<TrinoRow> arcticDeleteFilter) {
     this.expectedColumns = expectedColumns;
     this.icebergPageSourceProvider = icebergPageSourceProvider;
     this.transaction = transaction;
@@ -206,6 +206,9 @@ public class KeyedConnectorPageSource implements ConnectorPageSource {
   @Override
   public void close() throws IOException {
     close = true;
+    if (current != null) {
+      current.close();
+    }
   }
 
   protected void closeWithSuppression(Throwable throwable) {
@@ -220,8 +223,6 @@ public class KeyedConnectorPageSource implements ConnectorPageSource {
     }
   }
 
-
-  @Nullable
   private Page getPage() throws IOException {
     if (current == null) {
       if (dataTasksIt.hasNext()) {

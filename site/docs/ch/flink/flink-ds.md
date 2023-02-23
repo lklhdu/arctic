@@ -69,36 +69,15 @@ ArcticTable table = ArcticUtils.load(tableLoader);
 // }});
 Schema schema = table.schema();
 
-RowType flinkUserSchema = FlinkSchemaUtil.convert(schema);
+// -----------Hidden Kafka--------------
+LogKafkaSource source = LogKafkaSource.builder(schema, table.properties()).build();
 
-JsonRowDataDeserializationSchema deserializationSchema =
-    new JsonRowDataDeserializationSchema(
-        flinkUserSchema,
-        InternalTypeInfo.of(flinkUserSchema), false, false, TimestampFormat.ISO_8601);
+or
 
-List<String> topics = new ArrayList<>();
-topics.add("topic_name");
+// -----------Hidden Pulsar--------------
+LogPulsarSource source = LogPulsarSource.builder(schema, table.properties()).build();
 
-// 配置 kafka consumer 参数。详见 https://kafka.apache.org/documentation/#consumerconfigs
-Properties properties = new Properties();
-properties.put("group.id", groupId);
-properties.put("properties.bootstrap.servers", "broker1:port1, broker2:port2 ...");
-
-Configuration configuration = new Configuration();
-// 开启保证数据一致性的低延迟读
-configuration.set(ARCTIC_LOG_CONSISTENCY_GUARANTEE_ENABLE, true);
-
-LogKafkaConsumer kafkaConsumer = new LogKafkaConsumer(
-            topics,
-            new KafkaDeserializationSchemaWrapper<>(deserializationSchema),
-            properties,
-            schema,
-            configuration
-        );
-// 配置读的起始位置
-kafkaConsumer.setStartFromEarliest();
-
-DataStream<RowData> stream = env.addSource(kafkaConsumer);
+DataStream<RowData> stream = env.fromSource(source, WatermarkStrategy.noWatermarks(), "Log Source");
 // 打印读出的所有数据
 stream.print();
 
@@ -194,6 +173,6 @@ DataStream API 支持写主键表和非主键表。properties 支持的配置项
 
 > **TIPS**
 > 
-> arctic.emit.mode 包含 log 时，需要配置 log-store.enable = true [开启 Log 配置](flink-dml.md#log)
+> arctic.emit.mode 包含 log 时，需要配置 log-store.enabled = true [开启 Log 配置](flink-dml.md#log)
 >
 > arctic.emit.mode 包含 file 时，主键表只会写入 ChangeStore，非主键表会直接写入 BaseStore。

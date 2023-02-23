@@ -24,11 +24,13 @@ import com.netease.arctic.ams.api.OptimizeTaskId;
 import com.netease.arctic.ams.api.OptimizeType;
 import com.netease.arctic.data.DataFileType;
 import com.netease.arctic.data.DataTreeNode;
+import com.netease.arctic.data.file.ContentFileWithSequence;
 import com.netease.arctic.optimizer.OptimizerConfig;
 import com.netease.arctic.optimizer.util.ContentFileUtil;
 import com.netease.arctic.table.ArcticTable;
+import com.netease.arctic.table.TableProperties;
 import com.netease.arctic.table.UnkeyedTable;
-import org.apache.iceberg.DataFile;
+import java.util.List;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -45,7 +47,7 @@ public class TestSupportHiveMajorExecutor extends TestSupportHiveMajorOptimizeBa
     OptimizerConfig optimizerConfig = new OptimizerConfig(arg);
     optimizerConfig.setOptimizerId("UnitTest");
     MajorExecutor majorExecutor = new MajorExecutor(nodeTask, testKeyedHiveTable, System.currentTimeMillis(), optimizerConfig);
-    OptimizeTaskResult<DataFile> result = majorExecutor.execute();
+    OptimizeTaskResult result = majorExecutor.execute();
     Assert.assertEquals(Iterables.size(result.getTargetFiles()), 4);
     result.getTargetFiles().forEach(dataFile -> {
       Assert.assertEquals(240, dataFile.recordCount());
@@ -61,7 +63,7 @@ public class TestSupportHiveMajorExecutor extends TestSupportHiveMajorOptimizeBa
     OptimizerConfig optimizerConfig = new OptimizerConfig(arg);
     optimizerConfig.setOptimizerId("UnitTest");
     MajorExecutor majorExecutor = new MajorExecutor(nodeTask, testKeyedHiveTable, System.currentTimeMillis(), optimizerConfig);
-    OptimizeTaskResult<DataFile> result = majorExecutor.execute();
+    OptimizeTaskResult result = majorExecutor.execute();
     Assert.assertEquals(Iterables.size(result.getTargetFiles()), 4);
     result.getTargetFiles().forEach(dataFile -> {
       Assert.assertEquals(250, dataFile.recordCount());
@@ -77,7 +79,7 @@ public class TestSupportHiveMajorExecutor extends TestSupportHiveMajorOptimizeBa
     OptimizerConfig optimizerConfig = new OptimizerConfig(arg);
     optimizerConfig.setOptimizerId("UnitTest");
     MajorExecutor majorExecutor = new MajorExecutor(nodeTask, testKeyedHiveTable, System.currentTimeMillis(), optimizerConfig);
-    OptimizeTaskResult<DataFile> result = majorExecutor.execute();
+    OptimizeTaskResult result = majorExecutor.execute();
     Assert.assertEquals(Iterables.size(result.getTargetFiles()), 4);
     result.getTargetFiles().forEach(dataFile -> {
       Assert.assertEquals(240, dataFile.recordCount());
@@ -93,7 +95,7 @@ public class TestSupportHiveMajorExecutor extends TestSupportHiveMajorOptimizeBa
     OptimizerConfig optimizerConfig = new OptimizerConfig(arg);
     optimizerConfig.setOptimizerId("UnitTest");
     MajorExecutor majorExecutor = new MajorExecutor(nodeTask, testHiveTable, System.currentTimeMillis(), optimizerConfig);
-    OptimizeTaskResult<DataFile> result = majorExecutor.execute();
+    OptimizeTaskResult result = majorExecutor.execute();
     Assert.assertEquals(Iterables.size(result.getTargetFiles()), 1);
     result.getTargetFiles().forEach(dataFile -> {
       Assert.assertEquals(1000, dataFile.recordCount());
@@ -109,7 +111,7 @@ public class TestSupportHiveMajorExecutor extends TestSupportHiveMajorOptimizeBa
     OptimizerConfig optimizerConfig = new OptimizerConfig(arg);
     optimizerConfig.setOptimizerId("UnitTest");
     MajorExecutor majorExecutor = new MajorExecutor(nodeTask, testHiveTable, System.currentTimeMillis(), optimizerConfig);
-    OptimizeTaskResult<DataFile> result = majorExecutor.execute();
+    OptimizeTaskResult result = majorExecutor.execute();
     Assert.assertEquals(Iterables.size(result.getTargetFiles()), 1);
     result.getTargetFiles().forEach(dataFile -> {
       Assert.assertEquals(1000, dataFile.recordCount());
@@ -125,7 +127,7 @@ public class TestSupportHiveMajorExecutor extends TestSupportHiveMajorOptimizeBa
     OptimizerConfig optimizerConfig = new OptimizerConfig(arg);
     optimizerConfig.setOptimizerId("UnitTest");
     MajorExecutor majorExecutor = new MajorExecutor(nodeTask, testUnPartitionKeyedHiveTable, System.currentTimeMillis(), optimizerConfig);
-    OptimizeTaskResult<DataFile> result = majorExecutor.execute();
+    OptimizeTaskResult result = majorExecutor.execute();
     Assert.assertEquals(Iterables.size(result.getTargetFiles()), 4);
     result.getTargetFiles().forEach(dataFile -> {
       Assert.assertEquals(240, dataFile.recordCount());
@@ -141,7 +143,7 @@ public class TestSupportHiveMajorExecutor extends TestSupportHiveMajorOptimizeBa
     OptimizerConfig optimizerConfig = new OptimizerConfig(arg);
     optimizerConfig.setOptimizerId("UnitTest");
     MajorExecutor majorExecutor = new MajorExecutor(nodeTask, testUnPartitionKeyedHiveTable, System.currentTimeMillis(), optimizerConfig);
-    OptimizeTaskResult<DataFile> result = majorExecutor.execute();
+    OptimizeTaskResult result = majorExecutor.execute();
     Assert.assertEquals(Iterables.size(result.getTargetFiles()), 4);
     result.getTargetFiles().forEach(dataFile -> {
       Assert.assertEquals(240, dataFile.recordCount());
@@ -150,7 +152,21 @@ public class TestSupportHiveMajorExecutor extends TestSupportHiveMajorOptimizeBa
   }
 
   private NodeTask constructNodeTask(ArcticTable arcticTable, OptimizeType optimizeType) {
-    NodeTask nodeTask = new NodeTask();
+
+    UnkeyedTable baseTable = arcticTable.isKeyedTable() ?
+        arcticTable.asKeyedTable().baseTable() : arcticTable.asUnkeyedTable();
+
+    String fileFormat = arcticTable.properties().getOrDefault(TableProperties.DEFAULT_FILE_FORMAT,
+        TableProperties.DEFAULT_FILE_FORMAT_DEFAULT);
+
+    List<ContentFileWithSequence<?>> base =
+        baseDataFilesInfo.stream().map(s -> ContentFileUtil.buildContentFile(s, baseTable.spec(),
+            fileFormat)).collect(Collectors.toList());
+    List<ContentFileWithSequence<?>> pos =
+        posDeleteFilesInfo.stream().map(s -> ContentFileUtil.buildContentFile(s, baseTable.spec(),
+            fileFormat)).collect(Collectors.toList());
+
+    NodeTask nodeTask = new NodeTask(base, null, null, pos, true);
     nodeTask.setSourceNodes(baseDataFilesInfo.stream()
         .map(dataFileInfo -> DataTreeNode.of(dataFileInfo.getMask(), dataFileInfo.getIndex()))
         .collect(Collectors.toSet()));
@@ -158,19 +174,6 @@ public class TestSupportHiveMajorExecutor extends TestSupportHiveMajorOptimizeBa
     nodeTask.setTaskId(new OptimizeTaskId(optimizeType, UUID.randomUUID().toString()));
     nodeTask.setAttemptId(Math.abs(ThreadLocalRandom.current().nextInt()));
     nodeTask.setPartition(FILE_A.partition());
-
-    UnkeyedTable baseTable = arcticTable.isKeyedTable() ?
-        arcticTable.asKeyedTable().baseTable() : arcticTable.asUnkeyedTable();
-    for (DataFileInfo fileInfo : baseDataFilesInfo) {
-      nodeTask.addFile(
-          ContentFileUtil.buildContentFile(fileInfo, baseTable.spec(), arcticTable.io()),
-          DataFileType.BASE_FILE);
-    }
-    for (DataFileInfo fileInfo : posDeleteFilesInfo) {
-      nodeTask.addFile(
-          ContentFileUtil.buildContentFile(fileInfo, baseTable.spec(), arcticTable.io()),
-          DataFileType.POS_DELETE_FILE);
-    }
 
     return nodeTask;
   }

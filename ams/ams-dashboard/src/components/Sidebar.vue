@@ -1,6 +1,6 @@
 <template>
-  <div class="side-bar">
-    <div :class="{'logo-collapsed': collapsed}" @mouseenter="toggleTablesMenu(false)" class="logo g-flex-ac">
+  <div :class="{'side-bar-collapsed': collapsed}" class="side-bar">
+    <div :class="{'logo-collapsed': collapsed}" @mouseenter="toggleTablesMenu(false)" @click="viewIntroduce" class="logo g-flex-ac">
       <img src="../assets/images/logo.svg" class="logo-img" alt="">
       <img v-show="!collapsed" src="../assets/images/arctic-dashboard.svg" class="arctic-name" alt="">
     </div>
@@ -12,12 +12,7 @@
     >
       <a-menu-item v-for="item in menuList" :key="item.key" @click="navClick(item)" @mouseenter="mouseenter(item)" :class="{'active-color': (store.isShowTablesMenu && item.key === 'tables')}">
         <template #icon>
-          <DashboardOutlined v-if="item.icon === 'DashboardOutlined'" />
-          <TableOutlined v-if="item.icon === 'TableOutlined'" />
-          <svg-icon v-if="item.icon === 'ScheduleOutlined'" icon-class="optimizing" class="svg-icon" />
-          <SettingOutlined v-if="item.icon === 'SettingOutlined'" />
-          <SettingOutlined v-if="item.icon === 'SettingOutlined'" />
-          <svg-icon v-if="item.icon === 'ConsoleSqlOutlined'" icon-class="terminal" class="svg-icon" />
+          <svg-icon :icon-class="item.icon" class="svg-icon" />
         </template>
         <span>{{ $t(item.title) }}</span>
       </a-menu-item>
@@ -34,16 +29,10 @@
 
 <script lang="ts">
 import { computed, defineComponent, nextTick, reactive, toRefs, watchEffect } from 'vue'
-import {
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  DashboardOutlined,
-  TableOutlined,
-  SettingOutlined
-} from '@ant-design/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
 import useStore from '@/store/index'
 import TableMenu from '@/components/tables-sub-menu/TablesMenu.vue'
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { getQueryString } from '@/utils'
 
@@ -58,9 +47,6 @@ export default defineComponent({
   components: {
     MenuFoldOutlined,
     MenuUnfoldOutlined,
-    DashboardOutlined,
-    TableOutlined,
-    SettingOutlined,
     TableMenu
   },
   setup () {
@@ -85,31 +71,31 @@ export default defineComponent({
         }
       ]
       const allMenu : MenuItem[] = [
-        // {
-        //   key: 'overview',
-        //   title: t('overview'),
-        //   icon: 'DashboardOutlined'
-        // },
         {
           key: 'tables',
           title: t('tables'),
-          icon: 'TableOutlined'
+          icon: 'tables'
+        },
+        {
+          key: 'catalogs',
+          title: t('catalogs'),
+          icon: 'catalogs'
         },
         {
           key: 'optimizers',
           title: t('optimizers'),
-          icon: 'ScheduleOutlined'
+          icon: 'optimizers'
         },
         {
           key: 'terminal',
           title: t('terminal'),
-          icon: 'ConsoleSqlOutlined'
+          icon: 'terminal'
+        },
+        {
+          key: 'settings',
+          title: t('settings'),
+          icon: 'settings'
         }
-        // {
-        //   key: 'settings',
-        //   title: t('settings'),
-        //   icon: 'SettingOutlined'
-        // }
       ]
       return hasToken.value ? menu : allMenu
     })
@@ -141,6 +127,9 @@ export default defineComponent({
       router.replace({
         path: `/${item.key}`
       })
+      nextTick(() => {
+        setCurMenu()
+      })
     }
 
     const mouseenter = (item:MenuItem) => {
@@ -161,6 +150,12 @@ export default defineComponent({
       store.updateTablesMenu(flag)
     }
 
+    const viewIntroduce = () => {
+      router.push({
+        path: '/introduce'
+      })
+    }
+
     return {
       ...toRefs(state),
       hasToken,
@@ -170,7 +165,8 @@ export default defineComponent({
       mouseenter,
       store,
       toggleTablesMenu,
-      goCreatePage
+      goCreatePage,
+      viewIntroduce
     }
   }
 })
@@ -188,12 +184,22 @@ export default defineComponent({
       height: 100%;
       width: 200px;
       &.ant-menu-inline-collapsed {
-        width: 80px;
+        width: 64px;
+        .logo {
+          padding-left: 14px;
+        }
+        .toggle-btn {
+          position: absolute;
+          right: -68px;
+          top: 8px;
+          font-size: 18px;
+          padding: 0 24px;
+        }
       }
     }
     :deep(.ant-menu-item) {
       margin: 0;
-      padding-left: 30px !important;
+      padding-left: 22px !important;
       .ant-menu-title-content {
         width: 100%;
         margin-left: 12px;
@@ -210,9 +216,10 @@ export default defineComponent({
       }
     }
     .logo {
-      padding: 12px 0 18px 24px;
+      padding: 12px 0 12px 16px;
       overflow: hidden;
       background-color: #001529;
+      cursor: pointer;
     }
     .logo-img {
       width: 32px;
@@ -229,6 +236,9 @@ export default defineComponent({
       font-size: 18px;
       padding: 0 24px;
     }
+    .svg-icon {
+      font-size: 16px;
+    }
   }
   .tables-menu-wrap {
     position: absolute;
@@ -238,7 +248,7 @@ export default defineComponent({
     bottom: 0;
     z-index: 100;
     &.collapsed-sub-menu {
-      left: 80px;
+      left: 64px;
     }
   }
 </style>

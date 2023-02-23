@@ -39,6 +39,22 @@ public class OptimizerConfig implements Serializable {
   @Option(name = "-hb", aliases = "--heart-beat", usage = "heart beat interval (ms)")
   private long heartBeat = 10000; // 10 s
 
+  // support register optimizer
+  @Option(name = "-qn", aliases = "--queue-name", usage = "queue name")
+  private String queueName;
+
+  @Option(name = "-m", aliases = "--memory-size", usage = "memory size")
+  private int executorMemory;
+
+  @Option(name = "-es", aliases = "--enable-spill-map", usage = "whether enable spill map in optimizer")
+  private String enableSpillMap = "false";
+
+  @Option(name = "-mm", aliases = "--max-delete-memory-size", usage = "max delete map byte size in memory")
+  private long maxInMemorySizeInBytes = 524288000; // 500 M
+
+  @Option(name = "-rp", aliases = "--rock-base-path", usage = "rocks db base path")
+  private String rocksDBBasePath;
+
   public OptimizerConfig() {
   }
 
@@ -87,6 +103,46 @@ public class OptimizerConfig implements Serializable {
     this.optimizerId = optimizerId;
   }
 
+  public String getQueueName() {
+    return queueName;
+  }
+
+  public void setQueueName(String queueName) {
+    this.queueName = queueName;
+  }
+
+  public int getExecutorMemory() {
+    return executorMemory;
+  }
+
+  public void setExecutorMemory(int executorMemory) {
+    this.executorMemory = executorMemory;
+  }
+
+  public long getMaxInMemorySizeInBytes() {
+    return maxInMemorySizeInBytes;
+  }
+
+  public void setMaxInMemorySizeInBytes(long maxInMemorySizeInBytes) {
+    this.maxInMemorySizeInBytes = maxInMemorySizeInBytes;
+  }
+
+  public String getEnableSpillMap() {
+    return enableSpillMap;
+  }
+
+  public void setEnableSpillMap(String enableSpillMap) {
+    this.enableSpillMap = enableSpillMap;
+  }
+
+  public String getRocksDBBasePath() {
+    return rocksDBBasePath;
+  }
+
+  public void setRocksDBBasePath(String rocksDBBasePath) {
+    this.rocksDBBasePath = rocksDBBasePath;
+  }
+
   @Override
   public String toString() {
     return "OptimizerConfig{" +
@@ -95,6 +151,10 @@ public class OptimizerConfig implements Serializable {
         ", queueId=" + queueId +
         ", optimizerId='" + optimizerId + '\'' +
         ", heartBeat=" + heartBeat +
+        ", enableSpillMap='" + enableSpillMap + '\'' +
+        ", maxInMemorySizeInBytes=" + maxInMemorySizeInBytes +
+        ", rocksDBBasePath='" + rocksDBBasePath + '\'' +
         '}';
   }
+
 }

@@ -23,6 +23,7 @@ import com.netease.arctic.ams.api.CatalogMeta;
 import com.netease.arctic.table.ArcticTable;
 import com.netease.arctic.table.TableBuilder;
 import com.netease.arctic.table.TableIdentifier;
+import com.netease.arctic.table.blocker.TableBlockerManager;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.exceptions.NoSuchNamespaceException;
@@ -135,4 +136,16 @@ public interface ArcticCatalog {
    * @return the builder to build a table
    */
   TableBuilder newTableBuilder(TableIdentifier identifier, Schema schema);
+
+  /**
+   * Refresh catalog meta
+   */
+  void refresh();
+
+  /**
+   * Return a table blocker manager.
+   * @param tableIdentifier a table identifier
+   * @return A Table Blocker Mana
+   */
+  TableBlockerManager getTableBlockerManager(TableIdentifier tableIdentifier);
 }

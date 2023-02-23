@@ -28,5 +28,8 @@
     <suppress checks="naming" files="ArcticIndexHBaseWriter"/>
     <suppress checks="naming" files="ArcticRowDataHBaseLookupFunction"/>
     <suppress checks="naming" files="ShuffleRulePolicy"/>
+    <suppress checks="naming" files="AdaptHiveParquetWithFlinkSchemaVisitor"/>
+    <suppress checks="naming" files="AdaptHiveParquetWithSparkSchemaVisitor"/>
+    <suppress checks=".*" files="org[\\/]apache[\\/]flink[\\/]connector[\\/]pulsar[\\/].*"/>
 </suppressions>
 

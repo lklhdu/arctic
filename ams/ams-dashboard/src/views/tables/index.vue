@@ -4,8 +4,8 @@
       <div class="g-flex-jsb">
         <div class="g-flex-col">
           <div class="g-flex">
-            <span class="table-name g-text-nowrap">{{baseInfo.tableName}}</span>
-            <span class="create-time">{{ `${$t('createTime')}: ${baseInfo.createTime}` }}</span>
+            <span :title="baseInfo.tableName" class="table-name g-text-nowrap">{{baseInfo.tableName}}</span>
+            <span v-if="!isIceberg" class="create-time">{{ `${$t('createTime')}: ${baseInfo.createTime}` }}</span>
           </div>
           <div class="table-info g-flex-ac">
             <p>{{`${$t('table')}${$t('size')}`}}: <span class="text-color">{{baseInfo.size}}</span></p>
@@ -13,6 +13,8 @@
             <p>{{$t('file')}}:  <span class="text-color">{{baseInfo.file}}</span></p>
             <a-divider type="vertical" />
             <p>{{$t('averageFileSize')}}: <span class="text-color">{{baseInfo.averageFile}}</span></p>
+            <a-divider type="vertical" />
+            <p>{{$t('tableFormat')}}: <span class="text-color">{{baseInfo.tableFormat}}</span></p>
           </div>
         </div>
         <!-- <div class="table-edit">
@@ -21,11 +23,11 @@
         </div> -->
       </div>
       <div class="content">
-        <a-tabs v-model:activeKey="activeKey" destroyInactiveTabPane>
+        <a-tabs v-model:activeKey="activeKey" destroyInactiveTabPane @change="onChangeTab">
           <a-tab-pane key="Details" tab="Details">
             <u-details @setBaseDetailInfo="setBaseDetailInfo" />
           </a-tab-pane>
-           <a-tab-pane key="Files" tab="Files">
+          <a-tab-pane v-if="!isIceberg && detailLoaded" key="Files" tab="Files">
             <u-files :hasPartition="baseInfo.hasPartition"/>
           </a-tab-pane>
           <a-tab-pane v-for="tab in tabConfigs" :key="tab.key" :tab="`${tab.key}`">
@@ -40,7 +42,7 @@
 </template>
 
 <script lang="ts">
-import { defineComponent, reactive, toRefs, watch, shallowReactive } from 'vue'
+import { defineComponent, reactive, toRefs, watch, shallowReactive, computed, onMounted } from 'vue'
 // import { EditOutlined, DeleteOutlined } from '@ant-design/icons-vue'
 import UDetails from './components/Details.vue'
 import UFiles from './components/Files.vue'
@@ -79,17 +81,30 @@ export default defineComponent({
       activeKey: 'Details',
       isSecondaryNav: false,
       baseInfo: {
+        tableType: '',
         tableName: '',
         createTime: '',
         size: '',
         file: '',
         averageFile: '',
+        tableFormat: '',
         hasPartition: false
-      } as IBaseDetailInfo
+      } as IBaseDetailInfo,
+      detailLoaded: false
+    })
+
+    const isIceberg = computed(() => {
+      return state.baseInfo.tableType === 'ICEBERG'
     })
 
     const setBaseDetailInfo = (baseInfo: IBaseDetailInfo) => {
+      state.detailLoaded = true
       state.baseInfo = { ...baseInfo }
+    }
+    const onChangeTab = (key: string) => {
+      const query = { ...route.query }
+      query.tab = key
+      router.replace({ query: { ...query } })
     }
 
     const editTable = () => {}
@@ -111,20 +126,26 @@ export default defineComponent({
 
     watch(
       () => route.query,
-      () => {
-        state.activeKey = 'Details'
+      (value) => {
+        state.activeKey = value.tab as string
       }
     )
+
+    onMounted(() => {
+      state.activeKey = (route.query?.tab as string) || 'Details'
+    })
 
     return {
       ...toRefs(state),
       tabConfigs,
       store,
+      isIceberg,
       editTable,
       delTable,
       setBaseDetailInfo,
       hideTablesMenu,
-      goBack
+      goBack,
+      onChangeTab
     }
   }
 })

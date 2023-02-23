@@ -15,11 +15,23 @@ SELECT * FROM arctic_catalog.db.sample
 
 ```sql
 SELECT * FROM arctic_catalog.db.sample.change
+
++---+----+----+---------------+------------+--------------+
+| id|name|data|_transaction_id|_file_offset|_change_action|
++---+----+----+---------------+------------+--------------+
+|  1|dddd|abcd|              3|           1|        INSERT|
+|  1|dddd|abcd|              3|           2|        DELETE|
++---+----+----+---------------+------------+--------------+
 ```
+查出来结果会多三列数据分别是：
+
+- _transaction_id: 数据写入时AMS分配的 transaction id。批模式下为每条SQL执行时分配，流模式下为每次checkpoint 分配。
+- _file_offset：大小可以表示同一批 _transaction_id 中数据写入的先后顺序。
+- _change_action：表示数据的类型有 INSERT，DELETE 两种
 
 ## Write
 
-### Insert overwrite 
+### INSERT OVERWRITE 
 
 `INSERT OVERWRITE`可以用查询的结果替换表中的数据
 
@@ -56,10 +68,11 @@ partition( dt = '2021-1-1')  values
 (1, 'aaa'), (2, 'bbb'), (3, 'ccc') 
 ```
 
-???+note "在 Static 模式下，不支持在分区字段上定义 transform"
+> 在 Static 模式下，不支持在分区字段上定义 transform
 
+> 可以通过 SPARK SQL`set spark.sql.arctic.check-source-data-uniqueness.enabled = true` 开启对源表主键的唯一性校验，若存在相同主键，写入时会报错提示。
 
-### Insert into
+### INSERT INTO
 
 #### 无主键表
 要向无主键表添加新数据，请使用 `INSERT INTO`
@@ -71,7 +84,7 @@ INSERT INTO prod.db.table SELECT ...
 ```
 
 #### 有主键表
-向有主键表添加新数据，可以根据配置 `write.upsert.enable` 参数，来控制是否开启 `UPSERT` 功能。
+向有主键表添加新数据，可以根据配置 `write.upsert.enabled` 参数，来控制是否开启 `UPSERT` 功能。
 
 `UPSERT` 开启后，主键相同的行存在时执行 `UPDATE` 操作，不存在时执行 `INSERT` 操作
 
@@ -83,7 +96,7 @@ CREATE TABLE arctic_catalog.db.keyedTable (
     data string,
     primary key (id))
 USING arctic
-TBLPROPERTIES ('write.upsert.enable' = 'true')
+TBLPROPERTIES ('write.upsert.enabled' = 'true')
 ```
 
 ```sql
@@ -91,11 +104,11 @@ INSERT INTO arctic_catalog.db.keyedTable VALUES (1, 'a'), (2, 'b')
 
 INSERT INTO prod.db.keyedTable SELECT ...
 ```
-???+note "目前写入时如果数据没有去重，会导致 primary key 唯一性被破坏"
+> 可以通过 SPARK SQL`set spark.sql.arctic.check-source-data-uniqueness.enabled = true` 开启对源表主键的唯一性校验，若存在相同主键，写入时会报错提示。
 
 
 
-### Delete from
+### DELETE FROM
 
 Arctic Spark 支持 `DELETE FROM` 语法用于删除表中数据
 
@@ -111,7 +124,7 @@ WHERE EXISTS (SELECT oid FROM prod.db.returned_orders WHERE t1.oid = oid)
 ```
 
 
-### Update 
+### UPDATE 
 
 支持 `UPDATE` 语句对表进行更新
 
@@ -135,8 +148,6 @@ WHERE EXISTS (SELECT oid FROM prod.db.returned_orders WHERE t1.oid = oid)
 
 ### MERGE INTO
 
-支持使用 `MERGE INTO` 语句对无主键表进行更新
-
 ```sql 
 MERGE INTO prod.db.target t   -- a target table
 USING (SELECT ...) s          -- the source updates
@@ -157,5 +168,3 @@ WHEN MATCHED AND s.op = 'increment' THEN UPDATE SET t.count = t.count + 1
 WHEN NOT MATCHED THEN INSERT *
 
 ```
-
-???+note "MERGE INTO 语法在当前版本只支持无主键表"

@@ -38,7 +38,6 @@ import org.slf4j.LoggerFactory;
 import sun.security.krb5.KrbException;
 
 import java.io.ByteArrayInputStream;
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -66,7 +65,7 @@ public class TableMetaStore implements Serializable {
   private static final Logger LOG = LoggerFactory.getLogger(TableMetaStore.class);
 
   private static final ConcurrentHashMap<TableMetaStore, TableMetaStore>
-      objectCache = new ConcurrentHashMap<>();
+      CACHE = new ConcurrentHashMap<>();
 
   public static final String HADOOP_CONF_DIR = "conf.hadoop.dir";
   public static final String HIVE_SITE = "hive-site";
@@ -86,6 +85,25 @@ public class TableMetaStore implements Serializable {
   private static final String HADOOP_USER_PROPERTY = "HADOOP_USER_NAME";
   private static final String KRB5_CONF_PROPERTY = "java.security.krb5.conf";
 
+  private static Field UGI_PRINCIPLE_FIELD;
+  private static Field UGI_KEYTAB_FIELD;
+  private static boolean UGI_REFLECT;
+
+  static {
+    try {
+      // We must reset the private static variables in UserGroupInformation when re-login
+      UGI_PRINCIPLE_FIELD = UserGroupInformation.class.getDeclaredField("keytabPrincipal");
+      UGI_PRINCIPLE_FIELD.setAccessible(true);
+      UGI_KEYTAB_FIELD = UserGroupInformation.class.getDeclaredField("keytabFile");
+      UGI_KEYTAB_FIELD.setAccessible(true);
+      UGI_REFLECT = true;
+    } catch (NoSuchFieldException e) {
+      // Do not need to reflect if hadoop-common version is 3.1.0+
+      UGI_REFLECT = false;
+      LOG.warn("Fail to reflect UserGroupInformation", e);
+    }
+  }
+
   private final byte[] metaStoreSite;
   private final byte[] hdfsSite;
   private final byte[] coreSite;
@@ -94,12 +112,12 @@ public class TableMetaStore implements Serializable {
   private final byte[] krbKeyTab;
   private final byte[] krbConf;
   private final String krbPrincipal;
-
+  private final boolean disableAuth;
 
   private transient Configuration configuration;
   private transient UserGroupInformation ugi;
   private transient Path confCachePath;
-  private transient boolean ugiNotSupportReflect = false;
+  private transient String authInformation;
 
   /**
    * For Kerberos authentication, krb5.conf and keytab files need
@@ -117,8 +135,9 @@ public class TableMetaStore implements Serializable {
 
   private TableMetaStore(
       byte[] metaStoreSite, byte[] hdfsSite, byte[] coreSite, String authMethod,
-      String hadoopUsername, byte[] krbKeyTab, byte[] krbConf, String krbPrincipal) {
-    Preconditions.checkArgument(AUTH_METHOD_SIMPLE.equals(authMethod) || AUTH_METHOD_KERBEROS.equals(authMethod),
+      String hadoopUsername, byte[] krbKeyTab, byte[] krbConf, String krbPrincipal, boolean disableAuth) {
+    Preconditions.checkArgument(
+        authMethod == null || AUTH_METHOD_SIMPLE.equals(authMethod) || AUTH_METHOD_KERBEROS.equals(authMethod),
         "Error auth method:%s", authMethod);
     this.metaStoreSite = metaStoreSite;
     this.hdfsSite = hdfsSite;
@@ -128,21 +147,23 @@ public class TableMetaStore implements Serializable {
     this.krbKeyTab = krbKeyTab;
     this.krbConf = krbConf;
     this.krbPrincipal = krbPrincipal;
+    this.disableAuth = disableAuth;
   }
 
   private TableMetaStore(
-      byte[] metaStoreSite, byte[] hdfsSite, byte[] coreSite, byte[] hbaseSite, String authMethod,
+      byte[] metaStoreSite, byte[] hdfsSite, byte[] coreSite, String authMethod,
       String hadoopUsername, byte[] krbKeyTab, byte[] krbConf, String krbPrincipal,
       Configuration configuration) {
     this.metaStoreSite = metaStoreSite == null ? new byte[0] : metaStoreSite;
     this.hdfsSite = hdfsSite == null ? new byte[0] : hdfsSite;
     this.coreSite = coreSite == null ? new byte[0] : coreSite;
-    this.authMethod = authMethod == null ? AUTH_METHOD_SIMPLE : authMethod;
+    this.authMethod = authMethod == null ? AUTH_METHOD_SIMPLE : authMethod.toUpperCase();
     this.hadoopUsername = hadoopUsername == null ? System.getProperty("user.name") : hadoopUsername;
     this.krbKeyTab = krbKeyTab == null ? new byte[0] : krbKeyTab;
     this.krbConf = krbConf == null ? new byte[0] : krbConf;
     this.krbPrincipal = krbPrincipal;
     this.configuration = configuration;
+    this.disableAuth = false;
   }
 
   public byte[] getMetaStoreSite() {
@@ -173,6 +194,10 @@ public class TableMetaStore implements Serializable {
     return authMethod;
   }
 
+  public boolean isKerberosAuthMethod() {
+    return AUTH_METHOD_KERBEROS.equalsIgnoreCase(authMethod);
+  }
+
   public String getHadoopUsername() {
     return hadoopUsername;
   }
@@ -186,9 +211,7 @@ public class TableMetaStore implements Serializable {
 
   public synchronized UserGroupInformation getUGI() {
     if (ugi == null) {
-      String threadName = Thread.currentThread().getName();
       try {
-        LOG.info("thread: {} start init ugi", threadName);
         if (TableMetaStore.AUTH_METHOD_SIMPLE.equals(authMethod)) {
           UserGroupInformation currentUser = UserGroupInformation.getCurrentUser();
           if (currentUser == null || !currentUser.getAuthenticationMethod().equals(
@@ -201,87 +224,106 @@ public class TableMetaStore implements Serializable {
           } else {
             ugi = currentUser;
           }
-          LOG.info("{} complete init ugi with {}", threadName, authMethod);
         } else if (TableMetaStore.AUTH_METHOD_KERBEROS.equals(authMethod)) {
-          if (confCachePath == null) {
-            confCachePath = generateKrbConfPath();
-            if (!confCachePath.toFile().exists()) {
-              confCachePath.toFile().mkdirs();
-            }
-          }
+          generateKrbConfPath();
           constructUgi();
-          LOG.info("{} complete init ugi with {}", threadName, authMethod);
         }
+        LOG.info("Complete to build ugi {}", authInformation());
       } catch (IOException | KrbException e) {
         throw new RuntimeException("Fail to init user group information", e);
       }
     } else {
       if (TableMetaStore.AUTH_METHOD_KERBEROS.equals(authMethod)) {
-        synchronized (UserGroupInformation.class) {
-          Field keytabPrincipalField = null;
-          Field keytabFileField = null;
-          String oldKeytabPrincipal = null;
-          String oldKeytabFile = null;
-          if (!ugiNotSupportReflect) {
-            try {
-              // use reflection to set private static field of UserGroupInformation for re-login
-              // to fix static field reuse bug before hadoop-common version 3.1.0
-              keytabPrincipalField = UserGroupInformation.class.getDeclaredField("keytabPrincipal");
-              keytabPrincipalField.setAccessible(true);
-              keytabFileField = UserGroupInformation.class.getDeclaredField("keytabFile");
-              keytabFileField.setAccessible(true);
-              oldKeytabPrincipal = (String) keytabPrincipalField.get(null);
-              oldKeytabFile = (String) keytabFileField.get(null);
-            } catch (NoSuchFieldException | IllegalAccessException e) {
-              ugiNotSupportReflect = true;
-              LOG.warn("cache reflection exception when get UserGroupInformation and not retry," +
-                  " if hadoop-common version is 3.1.0+, ignore this message", e);
-            }
-          }
-
+        // re-construct
+        if (!ugi.getAuthenticationMethod().toString().equals(authMethod) ||
+            !ugi.getUserName().equals(krbPrincipal)) {
           try {
-            if (!UserGroupInformation.isSecurityEnabled()) {
-              UserGroupInformation.setConfiguration(getConfiguration());
-              LOG.info(
-                  "Reset authentication method to Kerberos. now security env is \n" +
-                      "isSecurityEnabled {}, AuthenticationMethod {}, isKeytab {}",
-                  UserGroupInformation.isSecurityEnabled(),
-                  ugi.getAuthenticationMethod().toString(),
-                  ugi.isFromKeytab());
-            }
-            if (!ugiNotSupportReflect) {
-              if (keytabPrincipalField != null && keytabFileField != null) {
-                keytabPrincipalField.set(null, krbPrincipal);
-                keytabFileField.set(null, getConfPath(confCachePath, KEY_TAB_FILE_NAME));
-              }
-            }
-
-            if (!ugi.getAuthenticationMethod().toString().equals(authMethod) ||
-                !ugi.getUserName().equals(krbPrincipal)) {
-              LOG.info("current ugi is not equal target ugi need to reconstruct new ugi");
-              constructUgi();
-            }
-
-            ugi.checkTGTAndReloginFromKeytab();
+            constructUgi();
+            LOG.info("Complete to re-build ugi {}", authInformation());
           } catch (Exception e) {
-            throw new RuntimeException("Re-login from keytab failed", e);
-          } finally {
+            throw new RuntimeException("Fail to init user group information", e);
+          }
+        } else {
+          // re-login
+          synchronized (UserGroupInformation.class) {
+            String oldKeytabFile = null;
+            String oldPrincipal = null;
+            if (UGI_REFLECT) {
+              try {
+                // use reflection to set private static field of UserGroupInformation for re-login
+                // to fix static field reuse bug before hadoop-common version 3.1.0
+                oldKeytabFile = (String) UGI_KEYTAB_FIELD.get(null);
+                oldPrincipal = (String) UGI_PRINCIPLE_FIELD.get(null);
+              } catch (IllegalAccessException e) {
+                UGI_REFLECT = false;
+                LOG.warn("Fail to reflect UserGroupInformation", e);
+              }
+            }
+
+            String oldSystemPrincipal = System.getProperty("sun.security.krb5.principal");
+            boolean systemPrincipalChanged = false;
             try {
-              if (keytabPrincipalField != null) {
-                keytabPrincipalField.set(null, oldKeytabPrincipal);
+              if (!UserGroupInformation.isSecurityEnabled()) {
+                UserGroupInformation.setConfiguration(getConfiguration());
+                LOG.info(
+                    "Reset authentication method to Kerberos. now security env is \n" +
+                        "isSecurityEnabled {}, AuthenticationMethod {}, isKeytab {}",
+                    UserGroupInformation.isSecurityEnabled(),
+                    ugi.getAuthenticationMethod().toString(),
+                    ugi.isFromKeytab());
               }
-              if (keytabFileField != null) {
-                keytabFileField.set(null, oldKeytabFile);
+
+              if (UGI_REFLECT) {
+                try {
+                  UGI_PRINCIPLE_FIELD.set(null, krbPrincipal);
+                  UGI_KEYTAB_FIELD.set(null, getConfPath(confCachePath, KEY_TAB_FILE_NAME));
+                } catch (IllegalAccessException e) {
+                  UGI_REFLECT = false;
+                  LOG.warn("Fail to reflect UserGroupInformation", e);
+                }
               }
+
+              if (oldSystemPrincipal != null && !oldSystemPrincipal.equals(krbPrincipal)) {
+                System.setProperty("sun.security.krb5.principal", krbPrincipal);
+                systemPrincipalChanged = true;
+              }
+              ugi.checkTGTAndReloginFromKeytab();
             } catch (Exception e) {
-              LOG.warn("failed to set UserGroupInformation static field back to {} {} ",
-                  oldKeytabPrincipal, oldKeytabFile, e);
+              throw new RuntimeException("Re-login from keytab failed", e);
+            } finally {
+              if (UGI_REFLECT) {
+                try {
+                  UGI_PRINCIPLE_FIELD.set(null, oldPrincipal);
+                  UGI_KEYTAB_FIELD.set(null, oldKeytabFile);
+                } catch (IllegalAccessException e) {
+                  UGI_REFLECT = false;
+                  LOG.warn("Fail to reflect UserGroupInformation", e);
+                }
+              }
+              if (systemPrincipalChanged) {
+                System.setProperty("sun.security.krb5.principal", oldSystemPrincipal);
+              }
             }
           }
         }
       }
     }
     return ugi;
+  }
+
+  private String authInformation() {
+    if (authInformation == null) {
+      StringBuilder stringBuilder = new StringBuilder();
+      if (disableAuth) {
+        stringBuilder.append("disable authentication");
+      } else if (AUTH_METHOD_KERBEROS.equalsIgnoreCase(authMethod)) {
+        stringBuilder.append(authMethod).append("(").append(krbPrincipal).append(")");
+      } else if (AUTH_METHOD_SIMPLE.equalsIgnoreCase(authMethod)) {
+        stringBuilder.append(authMethod).append("(").append(hadoopUsername).append(")");
+      }
+      authInformation = stringBuilder.toString();
+    }
+    return authInformation;
   }
 
   private void constructUgi() throws IOException, KrbException {
@@ -296,32 +338,49 @@ public class TableMetaStore implements Serializable {
   }
 
   public <T> T doAs(Callable<T> callable) {
-    return Objects.requireNonNull(getUGI()).doAs((PrivilegedAction<T>) () -> {
-      try {
-        return callable.call();
-      } catch (Throwable e) {
-        if (e instanceof RuntimeException) {
-          throw (RuntimeException) e;
-        }
-        throw new RuntimeException("run with ugi doAs request failed.", e);
+    // if disableAuth, use process ugi to execute
+    if (disableAuth) {
+      return doAsUgi(callable);
+    }
+    return Objects.requireNonNull(getUGI()).doAs((PrivilegedAction<T>) () -> doAsUgi(callable));
+  }
+
+  /**
+   * Login with configured catalog user and create a proxy user ugi. Then the operations are performed
+   * within the doAs method of this proxy user ugi.
+   */
+  public <T> T doAsImpersonating(String proxyUser, Callable<T> callable) {
+    // if disableAuth, use process ugi to execute
+    if (disableAuth) {
+      return doAsUgi(callable);
+    }
+    // create proxy user ugi and execute
+    UserGroupInformation proxyUgi = UserGroupInformation.createProxyUser(proxyUser, Objects.requireNonNull(getUGI()));
+    LOG.debug("proxy user {} with catalog ugi {}, and run with ugi {}.", proxyUser, getUGI(), proxyUgi);
+    return proxyUgi.doAs((PrivilegedAction<T>) () -> doAsUgi(callable));
+  }
+
+  private  <T> T doAsUgi(Callable<T> callable) {
+    try {
+      return callable.call();
+    } catch (Throwable e) {
+      if (e instanceof RuntimeException) {
+        LOG.error("run with ugi request failed.", e);
+        throw (RuntimeException) e;
       }
-    });
+      throw new RuntimeException("run with ugi request failed.", e);
+    }
   }
 
   public synchronized Optional<URL> getHiveSiteLocation() {
     try {
-      if (confCachePath == null) {
-        confCachePath = generateKrbConfPath();
-        if (!confCachePath.toFile().exists()) {
-          confCachePath.toFile().mkdirs();
-        }
-      }
+      Path confPath = generateKrbConfPath();
       if (ArrayUtils.isEmpty(metaStoreSite)) {
         return Optional.empty();
       }
-      Path hiveSitePath = Paths.get(confCachePath.toAbsolutePath().toString(), "hive-site.xml");
+      Path hiveSitePath = Paths.get(confPath.toAbsolutePath().toString(), "hive-site.xml");
       if (!hiveSitePath.toFile().exists()) {
-        hiveSitePath = Paths.get(saveConfInPath(confCachePath, META_STORE_SITE_FILE_NAME, metaStoreSite));
+        hiveSitePath = Paths.get(saveConfInPath(confPath, META_STORE_SITE_FILE_NAME, metaStoreSite));
       }
       org.apache.hadoop.fs.Path hadoopPath = new org.apache.hadoop.fs.Path(hiveSitePath.toAbsolutePath().toString());
       org.apache.hadoop.fs.Path hadoopPathWithSchema = new org.apache.hadoop.fs.Path("file://" +
@@ -333,11 +392,18 @@ public class TableMetaStore implements Serializable {
   }
 
   private Path generateKrbConfPath() {
-    String path = Paths.get("").toAbsolutePath().toString();
-    String confPath = String.format("%s/%s/%s", path, "arctic_krb_conf", md5() + "_" +
-        ManagementFactory.getRuntimeMXBean().getName());
-    LOG.info("generate Krb conf path: {}", confPath);
-    return Paths.get(confPath);
+    if (confCachePath == null) {
+      String path = Paths.get("").toAbsolutePath().toString();
+      String confPath = String.format("%s/%s/%s", path, "arctic_krb_conf", md5() + "_" +
+          ManagementFactory.getRuntimeMXBean().getName());
+      LOG.info("generate Krb conf path: {}", confPath);
+      Path p = Paths.get(confPath);
+      if (!p.toFile().exists()) {
+        p.toFile().mkdirs();
+      }
+      this.confCachePath = p;
+    }
+    return this.confCachePath;
   }
 
   private String saveConfInPath(Path confPath, String confName, byte[] confValues) {
@@ -367,6 +433,9 @@ public class TableMetaStore implements Serializable {
     Configuration configuration = new Configuration();
     configuration.addResource(new ByteArrayInputStream(metaStore.getCoreSite()));
     configuration.addResource(new ByteArrayInputStream(metaStore.getHdfsSite()));
+    if (!ArrayUtils.isEmpty(metaStore.getMetaStoreSite())) {
+      configuration.addResource(new ByteArrayInputStream(metaStore.getMetaStoreSite()));
+    }
     configuration.set(CommonConfigurationKeys.IPC_CLIENT_FALLBACK_TO_SIMPLE_AUTH_ALLOWED_KEY, "true");
     //Enforce configuration resolve resources
     configuration.get(CommonConfigurationKeysPublic.FS_DEFAULT_NAME_KEY);
@@ -396,12 +465,13 @@ public class TableMetaStore implements Serializable {
         Objects.equals(hadoopUsername, that.hadoopUsername) &&
         Arrays.equals(krbKeyTab, that.krbKeyTab) &&
         Arrays.equals(krbConf, that.krbConf) &&
-        Objects.equals(krbPrincipal, that.krbPrincipal);
+        Objects.equals(krbPrincipal, that.krbPrincipal) &&
+        Objects.equals(disableAuth, that.disableAuth);
   }
 
   @Override
   public int hashCode() {
-    int result = Objects.hash(authMethod, hadoopUsername, krbPrincipal);
+    int result = Objects.hash(disableAuth, authMethod, hadoopUsername, krbPrincipal);
     result = 31 * result + Arrays.hashCode(metaStoreSite);
     result = 31 * result + Arrays.hashCode(hdfsSite);
     result = 31 * result + Arrays.hashCode(coreSite);
@@ -414,13 +484,13 @@ public class TableMetaStore implements Serializable {
     private byte[] metaStoreSite;
     private byte[] hdfsSite;
     private byte[] coreSite;
-    private byte[] hbaseSite;
     private String authMethod;
     private String hadoopUsername;
     private byte[] krbKeyTab;
     private byte[] krbConf;
     private String krbPrincipal;
-    private Map<String, String> properties = Maps.newHashMap();
+    private boolean disableAuth = true;
+    private final Map<String, String> properties = Maps.newHashMap();
     private Configuration configuration;
 
     public Builder withMetaStoreSitePath(String metaStoreSitePath) {
@@ -471,25 +541,15 @@ public class TableMetaStore implements Serializable {
       return this;
     }
 
-    public Builder withHbaseSitePath(String hbaseSitePath) {
-      if (new File(hbaseSitePath).exists()) {
-        this.hbaseSite = readBytesFromFile(hbaseSitePath);
-      }
-      return this;
-    }
-
-    public Builder withHbaseSite(byte[] hbaseSiteBytes) {
-      this.hbaseSite = hbaseSiteBytes;
-      return this;
-    }
-
     public Builder withSimpleAuth(String hadoopUsername) {
+      this.disableAuth = false;
       this.authMethod = AUTH_METHOD_SIMPLE;
       this.hadoopUsername = hadoopUsername;
       return this;
     }
 
     public Builder withKrbAuth(String krbKeyTabPath, String krbConfPath, String krbPrincipal) {
+      this.disableAuth = false;
       this.authMethod = AUTH_METHOD_KERBEROS;
       this.krbKeyTab = readBytesFromFile(krbKeyTabPath);
       this.krbConf = readBytesFromFile(krbConfPath);
@@ -498,6 +558,7 @@ public class TableMetaStore implements Serializable {
     }
 
     public Builder withKrbAuth(byte[] krbKeyTabBytes, byte[] krbConfBytes, String krbPrincipal) {
+      this.disableAuth = false;
       this.authMethod = AUTH_METHOD_KERBEROS;
       this.krbKeyTab = krbKeyTabBytes;
       this.krbConf = krbConfBytes;
@@ -516,7 +577,8 @@ public class TableMetaStore implements Serializable {
     public Builder withAuth(
         String authMethod, String hadoopUsername, byte[] krbKeyTabBytes, byte[] krbConfBytes,
         String krbPrincipal) {
-      this.authMethod = authMethod;
+      this.disableAuth = false;
+      this.authMethod = authMethod == null ? null : authMethod.toUpperCase();
       this.hadoopUsername = hadoopUsername;
       this.krbKeyTab = krbKeyTabBytes;
       this.krbConf = krbConfBytes;
@@ -527,6 +589,7 @@ public class TableMetaStore implements Serializable {
     public Builder withBase64Auth(
         String authMethod, String hadoopUsername, String encodedKrbKeytab, String encodedKrbConf,
         String krbPrincipal) {
+      this.disableAuth = false;
       byte[] keytab = null;
       if (encodedKrbKeytab != null) {
         keytab = Base64.getDecoder().decode(encodedKrbKeytab);
@@ -572,14 +635,14 @@ public class TableMetaStore implements Serializable {
           withMetaStoreSitePath(String.format("%s/%s", hadoopConfDir, properties.get(HIVE_SITE)));
         }
         if (properties.containsKey(KRB5_CONF)) {
-          krbConfPath = String.format(String.format("%s/%s", hadoopConfDir, properties.get(KRB5_CONF)));
+          krbConfPath = String.format("%s/%s", hadoopConfDir, properties.get(KRB5_CONF));
         }
         if (properties.containsKey(KEYTAB)) {
-          keyTabPath = String.format(String.format("%s/%s", hadoopConfDir, properties.get(KEYTAB)));
+          keyTabPath = String.format("%s/%s", hadoopConfDir, properties.get(KEYTAB));
         }
       }
       if (properties.containsKey(AUTH_METHOD)) {
-        String authMethod = properties.get(AUTH_METHOD);
+        String authMethod = properties.get(AUTH_METHOD).toUpperCase();
         if (AUTH_METHOD_SIMPLE.equals(authMethod) && properties.containsKey(SIMPLE_USER_NAME)) {
           withSimpleAuth(properties.get(SIMPLE_USER_NAME));
         } else if (AUTH_METHOD_KERBEROS.equals(authMethod) && properties.containsKey(KEYTAB_LOGIN_USER) &&
@@ -599,14 +662,17 @@ public class TableMetaStore implements Serializable {
         Preconditions.checkNotNull(krbConf);
         Preconditions.checkNotNull(krbKeyTab);
         Preconditions.checkNotNull(krbPrincipal);
-      } else {
+      } else if (authMethod != null) {
         throw new IllegalArgumentException("Unsupported auth method:" + authMethod);
       }
+
+      LOG.info("Construct TableMetaStore with authMethod:{}, hadoopUsername:{}, krbPrincipal:{}",
+          authMethod, hadoopUsername, krbPrincipal);
       TableMetaStore metaStore =
           new TableMetaStore(metaStoreSite, hdfsSite, coreSite, authMethod, hadoopUsername,
-              krbKeyTab, krbConf, krbPrincipal);
+              krbKeyTab, krbConf, krbPrincipal, disableAuth);
       // If the ugi object is not closed, it will lead to a memory leak, so here need to cache the metastore object
-      TableMetaStore cachedMetaStore = objectCache.putIfAbsent(metaStore, metaStore);
+      TableMetaStore cachedMetaStore = CACHE.putIfAbsent(metaStore, metaStore);
       if (cachedMetaStore == null) {
         return metaStore;
       } else {
@@ -617,7 +683,7 @@ public class TableMetaStore implements Serializable {
     @VisibleForTesting
     public TableMetaStore buildForTest() {
       readProperties();
-      return new TableMetaStore(metaStoreSite, hdfsSite, coreSite, hbaseSite, authMethod, hadoopUsername,
+      return new TableMetaStore(metaStoreSite, hdfsSite, coreSite, authMethod, hadoopUsername,
           krbKeyTab, krbConf, krbPrincipal, configuration);
     }
   }

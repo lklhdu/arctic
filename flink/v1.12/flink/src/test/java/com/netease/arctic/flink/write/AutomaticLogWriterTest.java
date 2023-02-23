@@ -19,7 +19,7 @@
 package com.netease.arctic.flink.write;
 
 import com.netease.arctic.flink.FlinkTestBase;
-import com.netease.arctic.flink.kafka.testutils.KafkaTestBase;
+import com.netease.arctic.flink.util.kafka.KafkaTestBase;
 import com.netease.arctic.flink.metric.MetricsGenerator;
 import com.netease.arctic.flink.shuffle.LogRecordV1;
 import com.netease.arctic.flink.shuffle.ShuffleHelper;
@@ -73,7 +73,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.netease.arctic.flink.kafka.testutils.KafkaConfigGenerate.getPropertiesWithByteArray;
+import static com.netease.arctic.flink.util.kafka.KafkaConfigGenerate.getPropertiesWithByteArray;
 import static com.netease.arctic.flink.table.descriptors.ArcticValidator.LOG_STORE_CATCH_UP;
 import static com.netease.arctic.table.TableProperties.ENABLE_LOG_STORE;
 import static com.netease.arctic.table.TableProperties.LOG_STORE_ADDRESS;
@@ -334,6 +334,7 @@ public class AutomaticLogWriterTest extends FlinkTestBase {
     Properties properties = getPropertiesWithByteArray(kafkaTestBase.getProperties());
     properties.put(LOG_STORE_MESSAGE_TOPIC, topic);
     properties.put(ProducerConfig.ACKS_CONFIG, "all");
+    properties.put(ProducerConfig.BATCH_SIZE_CONFIG, "0");
     return properties;
   }
 }

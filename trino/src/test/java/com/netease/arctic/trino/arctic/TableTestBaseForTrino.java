@@ -76,7 +76,7 @@ public abstract class TableTestBaseForTrino extends AbstractTestQueryFramework {
       TableIdentifier.of(TEST_CATALOG_NAME, TEST_DB_NAME, "test_pk_table");
   protected static final Schema TABLE_SCHEMA = new Schema(
       Types.NestedField.required(1, "id", Types.IntegerType.get()),
-      Types.NestedField.required(2, "name", Types.StringType.get()),
+      Types.NestedField.required(2, "name$name", Types.StringType.get()),
       Types.NestedField.required(3, "op_time", Types.TimestampType.withoutZone())
   );
   protected static final Record RECORD = GenericRecord.create(TABLE_SCHEMA);
@@ -168,10 +168,8 @@ public abstract class TableTestBaseForTrino extends AbstractTestQueryFramework {
 
   protected List<DataFile> writeChange(TableIdentifier identifier, ChangeAction action, List<Record> records) {
     KeyedTable table = testCatalog.loadTable(identifier).asKeyedTable();
-    long txId = table.beginTransaction("");
     try (GenericChangeTaskWriter writer = GenericTaskWriters.builderFor(table)
         .withChangeAction(action)
-        .withTransactionId(txId)
         .buildChangeWriter()) {
       records.forEach(d -> {
         try {

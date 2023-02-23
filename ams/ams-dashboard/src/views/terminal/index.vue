@@ -263,7 +263,9 @@ export default defineComponent({
         runStatus.value = logStatus
         await getDebugResult()
         if (logStatus === 'Finished' || logStatus === 'Canceled') {
-          operationActive.value = resultTabList[0].id
+          if (resultTabList.length) {
+            operationActive.value = resultTabList[0].id
+          }
         } else {
           logInterval.value = setTimeout(() => {
             getLogResult()
@@ -402,8 +404,8 @@ export default defineComponent({
 
 <style lang="less" scoped>
 .console-wrap {
-  user-select: none;
   height: 100%;
+  padding: 16px 24px;
   .console-content {
     background-color: #fff;
     height: 100%;
@@ -426,6 +428,7 @@ export default defineComponent({
       }
     }
     .sql-wrap {
+      user-select: none;
       font-size: 0;
       border: 1px solid #e5e5e5;
       border-bottom: 0;
@@ -556,13 +559,14 @@ export default defineComponent({
     bottom: 0;
     width: 100%;
     z-index: 2;
+    background-color: #fff;
   }
   .tab-operation {
     display: flex;
     justify-content: space-between;
     height: 40px;
     line-height: 40px;
-    border-bottom: 1px solid @border-color-dev;
+    border-bottom: 1px solid #e5e5e5;
     padding: 0 20px 0 16px;
     .tab {
       display: flex;

@@ -22,7 +22,6 @@ import com.google.common.collect.Lists;
 import com.netease.arctic.hive.HMSClient;
 import com.netease.arctic.hive.HMSClientPool;
 import com.netease.arctic.hive.table.UnkeyedHiveTable;
-import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.DeleteFiles;
 import org.apache.iceberg.ExpireSnapshots;
@@ -160,6 +159,12 @@ public class HiveOperationTransaction implements Transaction {
 
     @Override
     public <R> R run(Action<R, HMSClient, TException> action) {
+      pendingActions.add(action);
+      return null;
+    }
+
+    @Override
+    public <R> R run(Action<R, HMSClient, TException> action, boolean retry) throws TException, InterruptedException {
       pendingActions.add(action);
       return null;
     }

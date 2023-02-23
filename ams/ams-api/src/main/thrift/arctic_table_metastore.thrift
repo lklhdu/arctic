@@ -27,6 +27,7 @@ struct DataFile {
     6: i64 specId;
     7: list<PartitionFieldData> partition;
     8: i64 recordCount;
+    // deprecated, may remove from v0.5
     9: map<string, binary> upperBounds;
 }
 
@@ -37,6 +38,7 @@ struct TableChange {
     3: list<DataFile> deleteFiles;
     4: i64 snapshotId;
     5: i64 parentSnapshotId;
+    6: i64 snapshotSequence;
 }
 
 // task commit info
@@ -81,6 +83,17 @@ enum CommitMetaProducer {
     INGESTION
 }
 
+struct Blocker {
+    1:string blockerId;
+    2:list<BlockableOperation> operations;
+    3:map<string, string> properties;
+}
+
+enum BlockableOperation {
+   OPTIMIZE,
+   BATCH_WRITE
+}
+
 /**
 * replace TableContainer、ArcticTableItem
 **/
@@ -123,4 +136,14 @@ service ArcticTableMetastore {
     void tableCommit(1: TableCommitMeta commit) throws (1: arctic_commons.MetaException e1)
 
     i64 allocateTransactionId(1:arctic_commons.TableIdentifier tableIdentifier, 2:string transactionSignature)
+    
+    Blocker block(1:arctic_commons.TableIdentifier tableIdentifier, 2:list<BlockableOperation> operations, 3:map<string, string> properties) 
+        throws (1: arctic_commons.OperationConflictException e1)
+        
+    void releaseBlocker(1:arctic_commons.TableIdentifier tableIdentifier, 2:string blockerId)
+    
+    i64 renewBlocker(1:arctic_commons.TableIdentifier tableIdentifier, 2:string blockerId)
+        throws(1: arctic_commons.NoSuchObjectException e)
+    
+    list<Blocker> getBlockers(1:arctic_commons.TableIdentifier tableIdentifier)
 }

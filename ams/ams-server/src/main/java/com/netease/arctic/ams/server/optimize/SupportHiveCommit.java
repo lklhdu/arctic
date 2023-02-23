@@ -1,19 +1,39 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.netease.arctic.ams.server.optimize;
 
 import com.google.common.base.Preconditions;
 import com.netease.arctic.ams.api.OptimizeType;
-import com.netease.arctic.ams.server.model.BaseOptimizeTask;
-import com.netease.arctic.ams.server.model.BaseOptimizeTaskRuntime;
+import com.netease.arctic.ams.api.properties.OptimizeTaskProperties;
+import com.netease.arctic.ams.server.model.BasicOptimizeTask;
+import com.netease.arctic.ams.server.model.OptimizeTaskRuntime;
+import com.netease.arctic.data.file.FileNameGenerator;
 import com.netease.arctic.hive.HMSClientPool;
 import com.netease.arctic.hive.table.SupportHive;
 import com.netease.arctic.hive.utils.HivePartitionUtil;
 import com.netease.arctic.hive.utils.HiveTableUtil;
 import com.netease.arctic.hive.utils.TableTypeUtil;
 import com.netease.arctic.table.ArcticTable;
-import com.netease.arctic.utils.FileUtil;
-import com.netease.arctic.utils.IdGenerator;
-import com.netease.arctic.utils.SerializationUtil;
+import com.netease.arctic.utils.SerializationUtils;
+import com.netease.arctic.utils.TableFileUtils;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.StructLike;
@@ -23,21 +43,21 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-public class SupportHiveCommit extends BaseOptimizeCommit {
+public class SupportHiveCommit extends BasicOptimizeCommit {
   private static final Logger LOG = LoggerFactory.getLogger(SupportHiveCommit.class);
 
   protected Consumer<OptimizeTaskItem> updateTargetFiles;
 
-  public SupportHiveCommit(ArcticTable arcticTable,
-                           Map<String, List<OptimizeTaskItem>> optimizeTasksToCommit,
-                           Consumer<OptimizeTaskItem> updateTargetFiles) {
+  public SupportHiveCommit(
+      ArcticTable arcticTable,
+      Map<String, List<OptimizeTaskItem>> optimizeTasksToCommit,
+      Consumer<OptimizeTaskItem> updateTargetFiles) {
     super(arcticTable, optimizeTasksToCommit);
     Preconditions.checkArgument(TableTypeUtil.isHive(arcticTable), "The table not support hive");
     this.updateTargetFiles = updateTargetFiles;
@@ -58,12 +78,12 @@ public class SupportHiveCommit extends BaseOptimizeCommit {
       // to hive location
       if (isPartitionMajorOptimizeSupportHive(partition, optimizeTaskItems)) {
         for (OptimizeTaskItem optimizeTaskItem : optimizeTaskItems) {
-          BaseOptimizeTaskRuntime optimizeRuntime = optimizeTaskItem.getOptimizeRuntime();
+          OptimizeTaskRuntime optimizeRuntime = optimizeTaskItem.getOptimizeRuntime();
           List<DataFile> targetFiles = optimizeRuntime.getTargetFiles().stream()
-              .map(fileByte -> (DataFile) SerializationUtil.toInternalTableFile(fileByte))
+              .map(fileByte -> (DataFile) SerializationUtils.toContentFile(fileByte))
               .collect(Collectors.toList());
           long maxTransactionId = targetFiles.stream()
-              .mapToLong(dataFile -> FileUtil.parseFileTidFromFileName(dataFile.path().toString()))
+              .mapToLong(dataFile -> FileNameGenerator.parseTransactionId(dataFile.path().toString()))
               .max()
               .orElse(0L);
 
@@ -83,22 +103,22 @@ public class SupportHiveCommit extends BaseOptimizeCommit {
                   break;
                 }
               } else {
-                String hiveSubdirectory = HiveTableUtil.newHiveSubdirectory(
-                    arcticTable.isKeyedTable() ? maxTransactionId : IdGenerator.randomId());
-                partitionPath = HiveTableUtil.newHiveDataLocation(((SupportHive) arcticTable).hiveLocation(),
-                    arcticTable.spec(), targetFile.partition(), hiveSubdirectory);
-                HivePartitionUtil
-                    .createPartitionIfAbsent(hiveClient, arcticTable, partitionValues, partitionPath,
-                        Collections.emptyList(), (int) (System.currentTimeMillis() / 1000));
+                String hiveSubdirectory = arcticTable.isKeyedTable() ?
+                    HiveTableUtil.newHiveSubdirectory(maxTransactionId) : HiveTableUtil.newHiveSubdirectory();
 
-                partitionPath = HivePartitionUtil
-                    .getPartition(hiveClient, arcticTable, partitionValues).getSd().getLocation();
+                Partition p = HivePartitionUtil.getPartition(hiveClient, arcticTable, partitionValues);
+                if (p == null) {
+                  partitionPath = HiveTableUtil.newHiveDataLocation(((SupportHive) arcticTable).hiveLocation(),
+                      arcticTable.spec(), targetFile.partition(), hiveSubdirectory);
+                } else {
+                  partitionPath = p.getSd().getLocation();
+                }
               }
               partitionPathMap.put(partition, partitionPath);
             }
 
             DataFile finalDataFile = moveTargetFiles(targetFile, partitionPathMap.get(partition));
-            newTargetFiles.add(SerializationUtil.toByteBuffer(finalDataFile));
+            newTargetFiles.add(SerializationUtils.toByteBuffer(finalDataFile));
           }
 
           optimizeRuntime.setTargetFiles(newTargetFiles);
@@ -112,9 +132,9 @@ public class SupportHiveCommit extends BaseOptimizeCommit {
 
   protected boolean isPartitionMajorOptimizeSupportHive(String partition, List<OptimizeTaskItem> optimizeTaskItems) {
     for (OptimizeTaskItem optimizeTaskItem : optimizeTaskItems) {
-      BaseOptimizeTask optimizeTask = optimizeTaskItem.getOptimizeTask();
+      BasicOptimizeTask optimizeTask = optimizeTaskItem.getOptimizeTask();
       boolean isMajorTaskSupportHive = optimizeTask.getTaskId().getType() == OptimizeType.Major &&
-          CollectionUtils.isEmpty(optimizeTask.getPosDeleteFiles());
+          optimizeTask.getProperties().containsKey(OptimizeTaskProperties.MOVE_FILES_TO_HIVE_LOCATION);
       if (!isMajorTaskSupportHive) {
         LOG.info("{} is not major task support hive for partitions {}", arcticTable.id(), partition);
         return false;
@@ -127,9 +147,13 @@ public class SupportHiveCommit extends BaseOptimizeCommit {
 
   private DataFile moveTargetFiles(DataFile targetFile, String hiveLocation) {
     String oldFilePath = targetFile.path().toString();
-    String newFilePath = FileUtil.getNewFilePath(hiveLocation, oldFilePath);
+    String newFilePath = TableFileUtils.getNewFilePath(hiveLocation, oldFilePath);
 
     if (!arcticTable.io().exists(newFilePath)) {
+      if (!arcticTable.io().exists(hiveLocation)) {
+        LOG.debug("{} hive location {} does not exist and need to mkdir before rename", arcticTable.id(), hiveLocation);
+        arcticTable.io().mkdirs(hiveLocation);
+      }
       arcticTable.io().rename(oldFilePath, newFilePath);
       LOG.debug("{} move file from {} to {}", arcticTable.id(), oldFilePath, newFilePath);
     }

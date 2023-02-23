@@ -48,7 +48,7 @@ public class TestBaseArcticPrimaryTable extends TableTestBaseWithInitDataForTrin
 
   @Test
   public void tableMORWithProject() throws InterruptedException {
-    assertQuery("select op_time, name from " + PK_TABLE_FULL_NAME,
+    assertQuery("select op_time, \"name$name\" from " + PK_TABLE_FULL_NAME,
         "VALUES (TIMESTAMP '2022-01-01 12:00:00', 'john'), " +
             "(TIMESTAMP'2022-01-02 12:00:00', 'lily'), " +
             "(TIMESTAMP'2022-01-03 12:00:00', 'jake'), " +
@@ -61,11 +61,37 @@ public class TestBaseArcticPrimaryTable extends TableTestBaseWithInitDataForTrin
   }
 
   @Test
+  public void baseQueryWhenTableNameContainCatalogAndDataBase(){
+    assertQuery("select id from " + "arctic.test_db.\"arctic.test_db.test_pk_table#base\"",  "VALUES 1, 2, 3");
+  }
+
+  @Test
+  public void baseQueryWhenTableNameContainDataBase(){
+    assertQuery("select id from " + "arctic.test_db.\"test_db.test_pk_table#base\"",  "VALUES 1, 2, 3");
+  }
+
+  @Test
   public void changeQuery(){
     assertQuery("select * from " + "arctic.test_db.\"test_pk_table#change\"",
-        "VALUES (6,'mack',TIMESTAMP '2022-01-01 12:00:00.000000' ,2,2,'INSERT')," +
+        "VALUES (6,'mack',TIMESTAMP '2022-01-01 12:00:00.000000' ,3,1,'INSERT')," +
             "(5,'mary',TIMESTAMP '2022-01-01 12:00:00.000000',2,1,'INSERT')," +
-            "(5,'mary',TIMESTAMP '2022-01-01 12:00:00.000000',3,1,'DELETE')");
+            "(5,'mary',TIMESTAMP '2022-01-01 12:00:00.000000',4,1,'DELETE')");
+  }
+
+  @Test
+  public void changeQueryWhenTableNameContainCatalogAndDataBase(){
+    assertQuery("select * from " + "arctic.test_db.\"arctic.test_db.test_pk_table#change\"",
+            "VALUES (6,'mack',TIMESTAMP '2022-01-01 12:00:00.000000' ,3,1,'INSERT')," +
+                    "(5,'mary',TIMESTAMP '2022-01-01 12:00:00.000000',2,1,'INSERT')," +
+                    "(5,'mary',TIMESTAMP '2022-01-01 12:00:00.000000',4,1,'DELETE')");
+  }
+
+  @Test
+  public void changeQueryWhenTableNameContainDataBase(){
+    assertQuery("select * from " + "arctic.test_db.\"test_db.test_pk_table#change\"",
+            "VALUES (6,'mack',TIMESTAMP '2022-01-01 12:00:00.000000' ,3,1,'INSERT')," +
+                    "(5,'mary',TIMESTAMP '2022-01-01 12:00:00.000000',2,1,'INSERT')," +
+                    "(5,'mary',TIMESTAMP '2022-01-01 12:00:00.000000',4,1,'DELETE')");
   }
 
   @AfterClass

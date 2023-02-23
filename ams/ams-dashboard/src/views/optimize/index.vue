@@ -1,48 +1,51 @@
 <template>
-  <div class="optimize-wrap">
-    <div class="optimize-group g-flex-ac">
-      <div class="left-group">
-        <span class="g-mr-16">{{$t('optimzerGroup')}}</span>
-        <a-select
-          v-model:value="curGroupName"
-          :showSearch="true"
-          :options="groupList"
-          :placeholder="placeholder.selectOptGroupPh"
-          @change="onChangeGroup"
-          style="width: 240px"
-        />
+  <div class="border-wrap">
+    <div class="optimize-wrap">
+      <div class="optimize-group g-flex-ac">
+        <div class="left-group">
+          <span class="g-mr-16">{{$t('optimzerGroup')}}</span>
+          <a-select
+            v-model:value="curGroupName"
+            :showSearch="true"
+            :options="groupList"
+            :placeholder="placeholder.selectOptGroupPh"
+            @change="onChangeGroup"
+            style="width: 240px"
+          />
+        </div>
+        <div class="btn-wrap">
+          <span class="g-ml-16 f-shink-0">{{$t('resourceOccupation')}}  <span class="text-color">{{groupInfo.occupationCore}}</span> {{$t('core')}} <span class="text-color">{{groupInfo.occupationMemory}}</span> {{groupInfo.unit}}</span>
+          <a-button type="primary" @click="expansionJob" class="g-ml-8">{{$t('scaleOut')}}</a-button>
+        </div>
       </div>
-      <div class="btn-wrap">
-        <span class="g-ml-16 f-shink-0">{{$t('resourceOccupation')}}  <span class="text-color">{{groupInfo.occupationCore}}</span> {{$t('core')}} <span class="text-color">{{groupInfo.occupationMemory}}</span> {{groupInfo.unit}}</span>
-        <a-button type="primary" @click="expansionJob" class="g-ml-8">{{$t('scaleOut')}}</a-button>
+      <div class="content">
+        <a-tabs v-if="showTab" v-model:activeKey="activeTab" destroyInactiveTabPane @change="onChangeTab">
+          <a-tab-pane
+            v-for="tab in tabConfig"
+            :key="tab.value"
+            :tab="tab.label"
+            :class="[activeTab === tab.value ? 'active' : '']"
+            >
+            <List :curGroupName="curGroupName" :type="tab.value" @refreshCurGroupInfo="refreshCurGroupInfo" />
+          </a-tab-pane>
+        </a-tabs>
       </div>
     </div>
-    <div class="content">
-      <a-tabs v-model:activeKey="activeTab" destroyInactiveTabPane>
-        <a-tab-pane
-          v-for="tab in tabConfig"
-          :key="tab.value"
-          :tab="tab.label"
-          :class="[activeTab === tab.value ? 'active' : '']"
-          >
-          <List :curGroupName="curGroupName" :type="tab.value" :needFresh="needFresh" />
-        </a-tab-pane>
-      </a-tabs>
-    </div>
+    <scale-out-modal
+      v-if="showScaleOutModal"
+      :visible="showScaleOutModal"
+      :resourceGroup="curGroupName === 'all' ? '' : curGroupName"
+      @cancel="showScaleOutModal = false"
+      @refreshOptimizersTab="refreshOptimizersTab"
+    />
   </div>
-  <scale-out-modal
-    v-if="showScaleOutModal"
-    :visible="showScaleOutModal"
-    :resourceGroup="curGroupName === 'all' ? '' : curGroupName"
-    @cancel="showScaleOutModal = false"
-    @refreshOptimizersTab="refreshOptimizersTab"
-   />
 </template>
 
 <script lang="ts">
 import { IGroupItem, IGroupItemInfo, ILableAndValue, IMap } from '@/types/common.type'
-import { computed, defineComponent, onMounted, reactive, shallowReactive, toRefs } from 'vue'
+import { computed, defineComponent, nextTick, onMounted, reactive, shallowReactive, toRefs, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { usePlaceholder } from '@/hooks/usePlaceholder'
 import { usePagination } from '@/hooks/usePagination'
 import { getOptimizerGroups, getQueueResourceInfo } from '@/services/optimize.service'
@@ -58,7 +61,8 @@ export default defineComponent({
   },
   setup() {
     const { t } = useI18n()
-
+    const router = useRouter()
+    const route = useRoute()
     const tabConfig: ILableAndValue[] = shallowReactive([
       { label: t('optimizers'), value: 'optimizers' },
       { label: t('tables'), value: 'tables' }
@@ -80,14 +84,26 @@ export default defineComponent({
       } as IGroupItemInfo,
       activeTab: 'tables' as string,
       showScaleOutModal: false as boolean,
-      needFresh: false as boolean
+      showTab: false as boolean
     })
 
     const isTableTab = computed(() => {
       return (state.activeTab === 'tables')
     })
 
+    watch(() => route.query,
+      (value) => {
+        state.activeTab = (value.tab as string) || 'tables'
+      }, {
+        immediate: true
+      }
+    )
+
     const onChangeGroup = () => {
+      getCurGroupInfo()
+    }
+
+    const refreshCurGroupInfo = () => {
       getCurGroupInfo()
     }
 
@@ -117,11 +133,22 @@ export default defineComponent({
     }
 
     const refreshOptimizersTab = () => {
-      state.activeTab = 'optimizers'
-      state.needFresh = true
+      onChangeTab('optimizers')
+      state.showTab = false
+      nextTick(() => {
+        state.showTab = true
+      })
+      getCurGroupInfo()
+    }
+
+    const onChangeTab = (key: string) => {
+      const query = { ...route.query }
+      query.tab = key
+      router.replace({ query: { ...query } })
     }
 
     onMounted(() => {
+      state.showTab = true
       getCompactQueues()
       getCurGroupInfo()
     })
@@ -133,8 +160,10 @@ export default defineComponent({
       ...toRefs(state),
       tabConfig,
       onChangeGroup,
+      refreshCurGroupInfo,
       expansionJob,
-      refreshOptimizersTab
+      refreshOptimizersTab,
+      onChangeTab
     }
   }
 })
@@ -142,6 +171,10 @@ export default defineComponent({
 </script>
 
 <style lang="less" scoped>
+.border-wrap {
+  padding: 16px 24px;
+  height: 100%;
+}
 .optimize-wrap {
   border: 1px solid #e5e5e5;
   padding: 12px 0;

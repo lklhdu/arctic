@@ -1,17 +1,17 @@
 ## LOG 实时数据
 Arctic 表提供了 File 和 Log 的存储，File 存储海量的全量数据，Log 存储实时的增量数据。
-实时数据可以提供毫秒级的数据可见性，可在不开启 Kafka 事务的情况下，保证数据的一致性。
+实时数据可以提供毫秒级的数据可见性，可在不开启 Logstore 事务的情况下，保证数据的一致性。
 
-其底层存储可以对接外部消息队列中间件，当前仅支持 Kafka。
+其底层存储可以对接外部消息队列中间件，当前仅支持 Kafka、Pulsar。
 
-用户可以通过在创建 Arctic 表时配置下述参数开启 Logstore，具体配置可以参考 [Logstore 相关配置](../meta-service/table-properties.md#logstore)
+用户可以通过在创建 Arctic 表时配置下述参数开启 Logstore，具体配置可以参考 [Logstore 相关配置](../configurations.md#logstore)
 
 使用 Apache Kafka 作为 Logstore 存储系统[案例分享](hidden-kafka.md)
 
 详细的使用参考 [sql 读](#logstore)、[java 读](flink-ds.md#logstore)、[sql 写](#insert-into)、[java 写](flink-ds.md#appending-data)
 ## Changelog 数据
 
-对于 Arctic 主键表，FileStore 分为 BaseStore 和 ChangeStore 两部分数据，其中的 ChangeStore 存放实时写入的 CDC 数据，这部分数据会定期并入 Arctic BaseStore 中，详见 [Optimize](../table-format/table-store.md)。
+对于 Arctic 主键表，FileStore 分为 BaseStore 和 ChangeStore 两部分数据，其中的 ChangeStore 存放实时写入的 CDC 数据，这部分数据会定期并入 Arctic BaseStore 中，详见 [Optimize](../concepts/table-formats.md)。
 ChangeStore 数据依赖 Flink checkpoint 的周期时间进行提交，数据的可见性会有分钟级别延迟。
 
 后续可以通过 Flink 引擎读取 ChangeStore 进行数据回放用作计算分析，支持 +I，-D，-U 和 +U 四种 changelog 数据类型。
@@ -48,7 +48,7 @@ SET table.dynamic-table-options.enabled=true;
 ####非主键表 bounded 数据
 ```sql
 -- 读非主键表全量数据
-SELECT * FROM unkeyed;
+SELECT * FROM unkeyed /*+ OPTIONS('streaming'='false')*/;
 -- 读非主键表指定快照数据
 SELECT * FROM unkeyed /*+ OPTIONS('snapshot-id'='4411985347497777546')*/;
 ```
@@ -60,11 +60,12 @@ SELECT * FROM unkeyed /*+ OPTIONS('snapshot-id'='4411985347497777546')*/;
 |as-of-timestamp|(none)|Long|否|读小于该时间戳的最近一次 snapshot 的全量数据，只有在 streaming 为 false 或不配置时生效|
 |start-snapshot-id|(none)|Long|否|在 streaming 为 false 时，需配合 end-snapshot-id，读两个区间的增量数据(snapshot1, snapshot2]。<br>在 streaming 为 true 时，读该 snapshot 之后的增量数据，不指定则读当前快照之后（不包含当前）的增量数据|
 |end-snapshot-id|(none)|Long|否|在 streaming 为 false 时 需配合 start-snapshot-id，读两个区间的增量数据(snapshot1, snapshot2]|
+|其他表参数|(none)|String|否|Arctic 表的所有参数都可以通过 SQL Hint 动态修改，当然只针对此任务生效，具体的参数列表可以参考 [表配置](../configurations.md)。对于Catalog上的权限相关配置，也可以配置在Hint中，参数见 [catalog ddl 中的 properties.auth.XXX](./flink-ddl.md#Flink SQL)|
 
 ####主键表 bounded 数据
 ```sql
 --读当前全量及部分可能未合并的 CDC 数据
-SELECT * FROM keyed;
+SELECT * FROM keyed /*+ OPTIONS('streaming'='false')*/;
 ```
 
 ### Streaming Mode
@@ -86,10 +87,17 @@ SELECT * FROM test_table /*+ OPTIONS('arctic.read.mode'='log') */;
 |Key|默认值|类型|是否必填|描述|
 |--- |--- |--- |--- |---|
 |arctic.read.mode| file |String|否| 指定读 Arctic 表 File 或 Log 的数据。当值为 log 时，必须 开启 Log 配置|
-|properties.group.id| (none) |String|查询时可选，写入时可不填| 读取 Kafka Topic 时使用的 group id|
 |scan.startup.mode<img width=90/>| latest |String|否|有效值为earliest、latest、timestamp（读file暂未支持）。当arctic.read.mode = file 时仅支持earliest、latest。'earliest'表示读取全量表数据，在streaming=true时会继续incremental pull；'latest'：表示读取当前snapshot之后的数据，不包括当前snapshot数据。当arctic.read.mode = log 时，表示 Kafka 消费者初次启动时获取 offset 的模式，'earliest'表示从Kafka中最早的位置读取，'latest'表示从最新的位置读取，'timestamp'表示从Kafka中指定时间位置读取，需配置参数 'scan.startup.timestamp-millis'|
 |scan.startup.timestamp-millis|(none)|Long|否|当'scan.startup.mode'='timestamp'时有效，从指定的Kafka时间读取数据，值为从1970 1月1日 00:00:00.000 GMT 开始的毫秒时间戳|
-|properties.*| (none) |String|否| Kafka Consumer 支持的其他所有参数都可以通过在前面拼接 `properties.` 的前缀来设置，如：`'properties.batch.size'='16384'`，完整的参数信息可以参考 [Kafka官方手册](https://kafka.apache.org/documentation/#consumerconfigs) |
+|properties.group.id| (none) |String|Logstore 是 kafka 并且是查询时必填，否则可不填| 读取 Kafka Topic 时使用的 group id|
+|properties.pulsar.admin.adminUrl| (none) |String|Logstore 是 pulsar 时必填，否则可不填| Pulsar admin 的 HTTP URL，如：http://my-broker.example.com:8080|
+|properties.*| (none) |String|否| Logstore的参数。<br><br>对于 Logstore 为 Kafka ('log-store.type'='kafka' 默认值)时，Kafka Consumer 支持的其他所有参数都可以通过在前面拼接 `properties.` 的前缀来设置，<br>如：`'properties.batch.size'='16384'`，<br>完整的参数信息可以参考 [Kafka官方手册](https://kafka.apache.org/documentation/#consumerconfigs); <br><br>对于 Logstore 为 Pulsar ('log-store.type'='pulsar')时，Pulsar 支持的相关配置都可以通过在前面拼接 `properties.` 的前缀来设置，<br>如：`'properties.pulsar.client.requestTimeoutMs'='60000'`，<br>完整的参数信息可以参考 [Flink-Pulsar-Connector文档](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/connectors/datastream/pulsar)|
+|log-store.kafka.compatible.enabled| false | Boolean | 否 | 兼容 Logstore Kafka 废弃的 Source API。当读取 logstore kafka 的 Flink 任务需要带状态升级到 0.4.1 及以上 Arctic 版本时，必须将该参数设为 true，否则会遇到状态不兼容的异常。<br>该参数将于 0.7.0 版本删除，届时废弃的 Source API 也会被删除。|
+
+**注意事项**
+
+- 当 log-store.type = pulsar 时，Flink 任务的并行度不能小于 pulsar topic 的分区数，否则部分分区的数据无法读取
+- 当 log-store 的 Topic 分区数小于 Flink 任务的并行度时，部分 Flink subtask 将闲置。此时，如果任务有 watermark，必须配置参数 table.exec.source.idle-timeout，否则 watermark 将无法推进，详见 [官方文档](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/config/#table-exec-source-idle-timeout)
 
 ####非主键表 Filestore 数据
         
@@ -101,7 +109,7 @@ SET execution.runtime-mode = streaming;
 SET table.dynamic-table-options.enabled = true;
 
 -- 读当前快照之后的增量数据
-SELECT * FROM unkeyed /*+ OPTIONS('streaming'='true', 'monitor-interval'='1s')*/ ;
+SELECT * FROM unkeyed /*+ OPTIONS('monitor-interval'='1s')*/ ;
 ```
 Hint Options
 
@@ -111,6 +119,7 @@ Hint Options
 |arctic.read.mode|file|String|否|指定读 Arctic 表 File 或 Log 的数据。当值为 log 时，必须 开启 Log 配置|
 |monitor-interval<img width=120/>|10s|Duration|否|arctic.read.mode = file 时才生效。监控新提交数据文件的时间间隔|
 |start-snapshot-id|(none)|Long|否|从指定的 snapshot 开始读取增量数据（不包括 start-snapshot-id 的快照数据），不指定则读当前快照之后（不包含当前）的增量数据|
+|其他表参数|(none)|String|否|Arctic 表的所有参数都可以通过 SQL Hint 动态修改，当然只针对此任务生效，具体的参数列表可以参考 [表配置](../configurations.md)。对于Catalog上的权限相关配置，也可以配置在Hint中，参数见 [catalog ddl 中的 properties.auth.XXX](./flink-ddl.md#Flink SQL)|
 
 ####主键表 Filestore 数据
 
@@ -122,7 +131,7 @@ SET execution.runtime-mode = streaming;
 SET table.dynamic-table-options.enabled = true;
 
 -- 读全量数据及 changelog 中的 CDC 数据
-SELECT * FROM keyed /*+ OPTIONS('streaming'='true')*/ ;
+SELECT * FROM keyed;
 ```
 
 Hint Options
@@ -133,6 +142,7 @@ Hint Options
 |arctic.read.mode| file |String|否|指定读 Arctic 表 File 或 Log 的数据。当值为 log 时，必须 开启 Log 配置|
 |monitor-interval| 10s |String|否|arctic.read.mode = file 时才生效。监控新提交数据文件的时间间隔|
 |scan.startup.mode| latest |String|否|有效值为earliest、latest、timestamp（读file暂未支持）。当arctic.read.mode = file 时仅支持earliest、latest。'earliest'表示读取全量表数据，在streaming=true时会继续incremental pull；'latest'：表示读取当前snapshot之后的数据，不包括当前snapshot数据。当arctic.read.mode = log 时，表示 Kafka 消费者初次启动时获取 offset 的模式，'earliest'表示从Kafka中最早的位置读取，'latest'表示从最新的位置读取，'timestamp'表示从Kafka中指定时间位置读取，需配置参数 'scan.startup.timestamp-millis'|
+|其他表参数|(none)|String|否|Arctic 表的所有参数都可以通过 SQL Hint 动态修改，当然只针对此任务生效，具体的参数列表可以参考 [表配置](../configurations.md)。对于Catalog上的权限相关配置，也可以配置在Hint中，参数见 [catalog ddl 中的 properties.auth.XXX](./flink-ddl.md#Flink SQL)|
 
 ## Writing With SQL
 Arctic 表支持通过 Flink Sql 往 Log 或 File 写入数据
@@ -169,5 +179,6 @@ Hint Options
 |sink.parallelism|(none)|String|否|写入 file/log 并行度，file 提交算子的并行度始终为 1|
 |write.distribution-mode|hash|String|否|写入 Arctic 表的 distribution 模式。包括：none、hash|
 |write.distribution.hash-mode|auto|String|否|写入 Arctic 表的 hash 策略。只有当 write.distribution-mode=hash 时才生效。<br>primary-key、partition-key、primary-partition-key、auto。<br>primary-key: 按主键 shuffle<br>partition-key: 按分区 shuffle<br>primary-partition-key: 按主键+分区 shuffle<br>auto: 如果是有主键且有分区表，则为 primary-partition-key；如果是有主键且无分区表，则为 primary-key；如果是无主键且有分区表，则为 partition-key。否则为 none|
-|properties.*|(none)|String|否|Kafka Producer 支持的其他所有参数都可以通过在前面拼接 `properties.` 的前缀来设置，如：`'properties.batch.size'='16384'`，完整的参数信息可以参考 [kafka producer 配置](https://kafka.apache.org/documentation/#producerconfigs)|
-|其他表参数|(none)|String|否|Arctic 表的所有参数都可以通过 SQL Hint 动态修改，当然只针对此任务生效，具体的参数列表可以参考 [表配置](../meta-service/table-properties.md)|
+|properties.pulsar.admin.adminUrl| (none) |String|Logstore 是 pulsar 并且是查询时必填，否则可不填| Pulsar admin 的 HTTP URL，如：http://my-broker.example.com:8080|
+|properties.*|(none)|String|否| Logstore的参数。<br><br>对于 Logstore 为 Kafka ('log-store.type'='kafka' 默认值)时，Kafka Producer 支持的其他所有参数都可以通过在前面拼接 `properties.` 的前缀来设置，<br>如：`'properties.batch.size'='16384'`，<br>完整的参数信息可以参考 [Kafka官方手册](https://kafka.apache.org/documentation/#producerconfigs); <br><br>对于 Logstore 为 Pulsar ('log-store.type'='pulsar')时，Pulsar 支持的相关配置都可以通过在前面拼接 `properties.` 的前缀来设置，<br>如：`'properties.pulsar.client.requestTimeoutMs'='60000'`，<br>完整的参数信息可以参考 [Flink-Pulsar-Connector文档](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/connectors/datastream/pulsar)|
+|其他表参数|(none)|String|否|Arctic 表的所有参数都可以通过 SQL Hint 动态修改，当然只针对此任务生效，具体的参数列表可以参考 [表配置](../configurations.md)。对于Catalog上的权限相关配置，也可以配置在Hint中，参数见 [catalog ddl 中的 properties.auth.XXX](./flink-ddl.md#Flink SQL)|

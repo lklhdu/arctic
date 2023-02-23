@@ -23,8 +23,16 @@ import com.netease.arctic.flink.util.DataUtil;
 import com.netease.arctic.flink.util.TestUtil;
 import com.netease.arctic.table.KeyedTable;
 import com.netease.arctic.table.TableIdentifier;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.testutils.CommonTestUtils;
+import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
+import org.apache.flink.streaming.api.operators.ChainingStrategy;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.watermark.Watermark;
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.api.DataTypes;
+import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.data.GenericRowData;
@@ -52,12 +60,14 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 import static com.netease.arctic.ams.api.MockArcticMetastoreServer.TEST_CATALOG_NAME;
 import static com.netease.arctic.table.TableProperties.LOCATION;
 
 public class TestWatermark extends FlinkTestBase {
-  public static final Logger LOG = LoggerFactory.getLogger(TestJoin.class);
+  public static final Logger LOG = LoggerFactory.getLogger(TestWatermark.class);
 
   @Rule
   public TemporaryFolder tempFolder = new TemporaryFolder();
@@ -75,11 +85,11 @@ public class TestWatermark extends FlinkTestBase {
     sql("DROP TABLE IF EXISTS arcticCatalog." + DB + "." + TABLE);
   }
 
-  @Test
+  @Test(timeout = 30000)
   public void testWatermark() throws Exception {
     sql(String.format("CREATE CATALOG arcticCatalog WITH %s", toWithClause(props)));
     Map<String, String> tableProperties = new HashMap<>();
-    tableProperties.put(LOCATION, tableDir.getAbsolutePath());
+    tableProperties.put(LOCATION, tableDir.getAbsolutePath() + "/" + TABLE);
     String table = String.format("arcticCatalog.%s.%s", DB, TABLE);
 
     sql("CREATE TABLE IF NOT EXISTS %s (" +
@@ -98,7 +108,7 @@ public class TestWatermark extends FlinkTestBase {
     RowType rowType = (RowType) flinkSchema.toRowDataType().getLogicalType();
     KeyedTable keyedTable = (KeyedTable) ArcticUtils.loadArcticTable(
         ArcticTableLoader.of(TableIdentifier.of(TEST_CATALOG_NAME, DB, TABLE), catalogBuilder));
-    TaskWriter<RowData> taskWriter = createKeyedTaskWriter(keyedTable, rowType, 1, true);
+    TaskWriter<RowData> taskWriter = createKeyedTaskWriter(keyedTable, rowType, true);
     List<RowData> baseData = new ArrayList<RowData>() {{
       add(GenericRowData.ofKind(
           RowKind.INSERT, 2L, 123, StringData.fromString("a"), StringData.fromString("a"),
@@ -111,26 +121,23 @@ public class TestWatermark extends FlinkTestBase {
 
     sql("create table d (tt as cast(op_time as timestamp(3)), watermark for tt as tt) like %s", table);
 
-    TableResult result = exec("select is_true from d");
+    Table source = getTableEnv().sqlQuery("select is_true from d");
 
-    CommonTestUtils.waitUntilJobManagerIsInitialized(() -> result.getJobClient().get().getJobStatus().get());
-    Set<Row> actual = new HashSet<>();
-    try (CloseableIterator<Row> iterator = result.collect()) {
-      Row row = iterator.next();
-      actual.add(row);
-    }
-    result.getJobClient().ifPresent(TestUtil::cancelJob);
+    WatermarkTestOperator op = new WatermarkTestOperator();
+    getTableEnv().toRetractStream(source, RowData.class)
+        .transform("test watermark", TypeInformation.of(RowData.class), op);
+    getEnv().executeAsync("test watermark");
 
-    List<Object[]> expected = new LinkedList<>();
-    expected.add(new Object[]{true});
-    Assert.assertEquals(DataUtil.toRowSet(expected), actual);
+    op.waitWatermark();
+
+    Assert.assertTrue(op.watermark > Long.MIN_VALUE);
   }
 
   @Test
   public void testSelectWatermarkField() throws Exception {
     sql(String.format("CREATE CATALOG arcticCatalog WITH %s", toWithClause(props)));
     Map<String, String> tableProperties = new HashMap<>();
-    tableProperties.put(LOCATION, tableDir.getAbsolutePath());
+    tableProperties.put(LOCATION, tableDir.getAbsolutePath() + "/" + TABLE);
     String table = String.format("arcticCatalog.%s.%s", DB, TABLE);
 
     sql("CREATE TABLE IF NOT EXISTS %s (" +
@@ -149,7 +156,7 @@ public class TestWatermark extends FlinkTestBase {
     RowType rowType = (RowType) flinkSchema.toRowDataType().getLogicalType();
     KeyedTable keyedTable = (KeyedTable) ArcticUtils.loadArcticTable(
         ArcticTableLoader.of(TableIdentifier.of(TEST_CATALOG_NAME, DB, TABLE), catalogBuilder));
-    TaskWriter<RowData> taskWriter = createKeyedTaskWriter(keyedTable, rowType, 1, true);
+    TaskWriter<RowData> taskWriter = createKeyedTaskWriter(keyedTable, rowType, true);
     List<RowData> baseData = new ArrayList<RowData>() {{
       add(GenericRowData.ofKind(
           RowKind.INSERT, 2L, 123, StringData.fromString("a"), StringData.fromString("a"),
@@ -175,6 +182,36 @@ public class TestWatermark extends FlinkTestBase {
     List<Object[]> expected = new LinkedList<>();
     expected.add(new Object[]{true, LocalDateTime.parse("2022-06-17T10:08:11")});
     Assert.assertEquals(DataUtil.toRowSet(expected), actual);
+  }
+
+  public static class WatermarkTestOperator extends AbstractStreamOperator<RowData>
+      implements OneInputStreamOperator<Tuple2<Boolean, RowData>, RowData> {
+
+    private static final long serialVersionUID = 1L;
+    public long watermark;
+    private static CompletableFuture<Void> waitWatermark = new CompletableFuture<>();
+
+    public WatermarkTestOperator() {
+      super();
+      chainingStrategy = ChainingStrategy.ALWAYS;
+    }
+
+    private void waitWatermark() throws InterruptedException, ExecutionException {
+      waitWatermark.get();
+    }
+
+    @Override
+    public void processElement(StreamRecord<Tuple2<Boolean, RowData>> element) throws Exception {
+      output.collect(element.asRecord());
+    }
+
+    @Override
+    public void processWatermark(Watermark mark) throws Exception {
+      LOG.info("processWatermark: {}", mark);
+      watermark = mark.getTimestamp();
+      waitWatermark.complete(null);
+      super.processWatermark(mark);
+    }
   }
 
 }

@@ -22,7 +22,8 @@ import com.netease.arctic.ams.api.PartitionFieldData;
 import com.netease.arctic.ams.api.TableMeta;
 import com.netease.arctic.ams.api.properties.MetaTableProperties;
 import com.netease.arctic.data.DataFileType;
-import com.netease.arctic.data.DefaultKeyedFile;
+import com.netease.arctic.data.DataTreeNode;
+import com.netease.arctic.data.file.FileNameGenerator;
 import com.netease.arctic.table.ArcticTable;
 import com.netease.arctic.table.PrimaryKeySpec;
 import com.netease.arctic.table.TableIdentifier;
@@ -35,7 +36,6 @@ import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.types.Types;
 
-import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,26 +54,16 @@ public class ConvertStructUtil {
    * @return ams file
    */
   public static com.netease.arctic.ams.api.DataFile convertToAmsDatafile(
-      org.apache.iceberg.ContentFile<?> dataFile,
-      ArcticTable table) {
+      org.apache.iceberg.ContentFile<?> dataFile, ArcticTable table, String tableType) {
+
+    String filePath = dataFile.path().toString();
+
     com.netease.arctic.ams.api.DataFile amsDataFile = new com.netease.arctic.ams.api.DataFile();
     amsDataFile.setFileSize(dataFile.fileSizeInBytes());
-    amsDataFile.setPath(dataFile.path().toString());
+    amsDataFile.setPath(filePath);
     amsDataFile.setPartition(partitionFields(table.spec(), dataFile.partition()));
     amsDataFile.setSpecId(table.spec().specId());
     amsDataFile.setRecordCount(dataFile.recordCount());
-    Map<Integer, ByteBuffer> upperBounds = dataFile.upperBounds();
-    if (upperBounds != null) {
-      Map<String, ByteBuffer> amsUpperBounds = new HashMap<>();
-      upperBounds.forEach((fieldId, value) -> {
-        Types.NestedField field = table.schema().findField(fieldId);
-        if (field != null) {
-          amsUpperBounds.put(field.name(), value);
-        }
-      });
-      amsDataFile.setUpperBounds(amsUpperBounds);
-    }
-
 
     /*
     Iceberg file has 3 types(FileContent) : DATA, POSITION_DELETES, EQUALITY_DELETES
@@ -85,24 +75,32 @@ public class ConvertStructUtil {
      */
     FileContent content = dataFile.content();
     if (content == FileContent.DATA) {
-      DefaultKeyedFile.FileMeta fileMeta = FileUtil.parseFileMetaFromFileName(dataFile.path().toString());
-      validateArcticFileType(content, dataFile.path().toString(), fileMeta.type());
-      amsDataFile.setFileType(fileMeta.type().name());
-      amsDataFile.setIndex(fileMeta.node().index());
-      amsDataFile.setMask(fileMeta.node().mask());
+      // if we can't parse file type from file name, handle it as base file
+      DataFileType dataFileType = FileNameGenerator.parseFileType(filePath, tableType);
+      validateArcticFileType(content, filePath, dataFileType);
+      amsDataFile.setFileType(dataFileType.name());
+
+      DataTreeNode node = FileNameGenerator.parseFileNodeFromFileName(filePath);
+      amsDataFile.setIndex(node.index());
+      amsDataFile.setMask(node.mask());
     } else if (content == FileContent.POSITION_DELETES) {
-      DefaultKeyedFile.FileMeta fileMeta = FileUtil.parseFileMetaFromFileName(dataFile.path().toString());
       amsDataFile.setFileType(DataFileType.POS_DELETE_FILE.name());
-      if (fileMeta.type() == DataFileType.POS_DELETE_FILE || fileMeta.type() == DataFileType.BASE_FILE) {
-        amsDataFile.setIndex(fileMeta.node().index());
-        amsDataFile.setMask(fileMeta.node().mask());
+
+      DataFileType dataFileType = FileNameGenerator.parseFileType(filePath, tableType);
+      if (dataFileType == DataFileType.POS_DELETE_FILE) {
+        DataTreeNode node = FileNameGenerator.parseFileNodeFromFileName(filePath);
+        amsDataFile.setIndex(node.index());
+        amsDataFile.setMask(node.mask());
       } else {
-        throw new IllegalArgumentException(
-            "iceberg file content should not be POSITION_DELETES for " + dataFile.path().toString());
+        if (!FileNameGenerator.isArcticFileFormat(filePath)) {
+          amsDataFile.setIndex(DataTreeNode.ROOT.getIndex());
+          amsDataFile.setMask(DataTreeNode.ROOT.getMask());
+        } else {
+          throw new IllegalArgumentException("iceberg file content should not be POSITION_DELETES for " + filePath);
+        }
       }
     } else {
-      throw new UnsupportedOperationException(
-          "not support file content now: " + content + ", " + dataFile.path().toString());
+      throw new UnsupportedOperationException("not support file content now: " + content + ", " + filePath);
     }
     return amsDataFile;
   }
@@ -113,7 +111,7 @@ public class ConvertStructUtil {
       case INSERT_FILE:
       case EQ_DELETE_FILE:
         Preconditions.checkArgument(content == FileContent.DATA,
-            "%s, File content should be POSITION_DELETES, but is %s", path, content);
+            "%s, File content should be DATA, but is %s", path, content);
         break;
       case POS_DELETE_FILE:
         Preconditions.checkArgument(content == FileContent.POSITION_DELETES,
@@ -124,7 +122,7 @@ public class ConvertStructUtil {
     }
   }
 
-  private static List<PartitionFieldData> partitionFields(PartitionSpec partitionSpec, StructLike partitionData) {
+  public static List<PartitionFieldData> partitionFields(PartitionSpec partitionSpec, StructLike partitionData) {
     List<PartitionFieldData> partitionFields = Lists.newArrayListWithCapacity(partitionSpec.fields().size());
     Class<?>[] javaClasses = partitionSpec.javaClasses();
     for (int i = 0; i < javaClasses.length; i += 1) {

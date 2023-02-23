@@ -21,13 +21,16 @@ package com.netease.arctic.ams.server.handler.impl;
 import com.netease.arctic.AmsClient;
 import com.netease.arctic.ams.api.AlreadyExistsException;
 import com.netease.arctic.ams.api.ArcticTableMetastore;
+import com.netease.arctic.ams.api.BlockableOperation;
+import com.netease.arctic.ams.api.Blocker;
 import com.netease.arctic.ams.api.CatalogMeta;
-import com.netease.arctic.ams.api.MetaException;
 import com.netease.arctic.ams.api.NoSuchObjectException;
 import com.netease.arctic.ams.api.NotSupportedException;
+import com.netease.arctic.ams.api.OperationConflictException;
 import com.netease.arctic.ams.api.TableCommitMeta;
 import com.netease.arctic.ams.api.TableIdentifier;
 import com.netease.arctic.ams.api.TableMeta;
+import com.netease.arctic.ams.server.model.TableBlocker;
 import com.netease.arctic.ams.server.model.TableMetadata;
 import com.netease.arctic.ams.server.service.IMetaService;
 import com.netease.arctic.ams.server.service.ServiceContainer;
@@ -41,7 +44,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
+
 
 public class ArcticTableMetastoreHandler implements AmsClient, ArcticTableMetastore.Iface {
   public static final Logger LOG = LoggerFactory.getLogger(ArcticTableMetastoreHandler.class);
@@ -70,11 +76,11 @@ public class ArcticTableMetastoreHandler implements AmsClient, ArcticTableMetast
 
   @Override
   public CatalogMeta getCatalog(String name) throws TException {
-    CatalogMeta c = catalogMetadataService.getCatalog(name);
-    if (c == null) {
+    Optional<CatalogMeta> c = catalogMetadataService.getCatalog(name);
+    if (!c.isPresent()) {
       throw new NoSuchObjectException("can't find catalog with name: " + name);
     }
-    return c;
+    return c.get();
   }
 
   @Override
@@ -86,8 +92,8 @@ public class ArcticTableMetastoreHandler implements AmsClient, ArcticTableMetast
   @Override
   public void createDatabase(String catalogName, String database) throws TException {
     LOG.info("handle create database: {}.{}", catalogName, database);
-    CatalogMeta c = catalogMetadataService.getCatalog(catalogName);
-    if (c == null) {
+    Optional<CatalogMeta> c = catalogMetadataService.getCatalog(catalogName);
+    if (!c.isPresent()) {
       throw new NoSuchObjectException("can't find catalog with name: " + catalogName);
     }
     if (metaService.listDatabases(catalogName).contains(database)) {
@@ -99,8 +105,8 @@ public class ArcticTableMetastoreHandler implements AmsClient, ArcticTableMetast
   @Override
   public void dropDatabase(String catalogName, String database) throws TException {
     LOG.info("handle drop database: {}.{}", catalogName, database);
-    CatalogMeta c = catalogMetadataService.getCatalog(catalogName);
-    if (c == null) {
+    Optional<CatalogMeta> c = catalogMetadataService.getCatalog(catalogName);
+    if (!c.isPresent()) {
       throw new NoSuchObjectException("can't find catalog with name: " + catalogName);
     }
     if (CollectionUtils.isNotEmpty(listTables(catalogName, database))) {
@@ -198,6 +204,34 @@ public class ArcticTableMetastoreHandler implements AmsClient, ArcticTableMetast
       throw new NoSuchObjectException("table identifier should not be null");
     }
     return ServiceContainer.getArcticTransactionService().allocateTransactionId(tableIdentifier,
-        transactionSignature, 5);
+        transactionSignature);
+  }
+
+  @Override
+  public Blocker block(TableIdentifier tableIdentifier, List<BlockableOperation> operations,
+                       Map<String, String> properties)
+      throws OperationConflictException {
+    TableBlocker block = ServiceContainer.getTableBlockerService()
+        .block(com.netease.arctic.table.TableIdentifier.of(tableIdentifier), operations, properties);
+    return block.buildBlocker();
+  }
+
+  @Override
+  public void releaseBlocker(TableIdentifier tableIdentifier, String blockerId) {
+    ServiceContainer.getTableBlockerService()
+        .release(com.netease.arctic.table.TableIdentifier.of(tableIdentifier), blockerId);
+  }
+
+  @Override
+  public long renewBlocker(TableIdentifier tableIdentifier, String blockerId) throws NoSuchObjectException {
+    return ServiceContainer.getTableBlockerService()
+        .renew(com.netease.arctic.table.TableIdentifier.of(tableIdentifier), blockerId);
+  }
+
+  @Override
+  public List<Blocker> getBlockers(TableIdentifier tableIdentifier) {
+    return ServiceContainer.getTableBlockerService()
+        .getBlockers(com.netease.arctic.table.TableIdentifier.of(tableIdentifier))
+        .stream().map(TableBlocker::buildBlocker).collect(Collectors.toList());
   }
 }

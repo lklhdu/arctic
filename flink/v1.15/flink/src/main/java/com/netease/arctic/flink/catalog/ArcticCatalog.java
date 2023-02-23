@@ -30,6 +30,7 @@ import com.netease.arctic.table.PrimaryKeySpec;
 import com.netease.arctic.table.TableBuilder;
 import com.netease.arctic.table.TableIdentifier;
 import com.netease.arctic.table.TableProperties;
+import com.netease.arctic.utils.CompatiblePropertyUtil;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.WatermarkSpec;
 import org.apache.flink.table.catalog.AbstractCatalog;
@@ -62,7 +63,6 @@ import org.apache.iceberg.flink.util.FlinkCompatibilityUtil;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
-import org.apache.iceberg.util.PropertyUtil;
 
 import java.util.Collections;
 import java.util.List;
@@ -70,8 +70,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static com.netease.arctic.flink.FlinkSchemaUtil.toSchema;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 
 /**
@@ -184,7 +183,7 @@ public class ArcticCatalog extends AbstractCatalog {
 
     List<String> partitionKeys = toPartitionKeys(table.spec(), table.schema());
     return new CatalogTableImpl(
-        com.netease.arctic.flink.FlinkSchemaUtil.toSchema(rowType, ArcticUtils.getPrimaryKeys(table)),
+        toSchema(rowType, ArcticUtils.getPrimaryKeys(table)),
         partitionKeys,
         arcticProperties,
         null);
@@ -235,34 +234,12 @@ public class ArcticCatalog extends AbstractCatalog {
   }
 
   private void fillTableProperties(Map<String, String> tableProperties) {
-    boolean enableStream = PropertyUtil.propertyAsBoolean(tableProperties,
+    boolean enableStream = CompatiblePropertyUtil.propertyAsBoolean(tableProperties,
         TableProperties.ENABLE_LOG_STORE, TableProperties.ENABLE_LOG_STORE_DEFAULT);
     if (enableStream) {
       tableProperties.putIfAbsent(FactoryUtil.FORMAT.key(), tableProperties.getOrDefault(
           TableProperties.LOG_STORE_DATA_FORMAT,
           TableProperties.LOG_STORE_DATA_FORMAT_DEFAULT));
-      if (tableProperties.containsKey(TableProperties.LOG_STORE_MESSAGE_TOPIC)) {
-        tableProperties.putIfAbsent(
-            TOPIC.key(),
-            tableProperties.get(TableProperties.LOG_STORE_MESSAGE_TOPIC));
-      }
-
-      if (tableProperties.containsKey(TableProperties.LOG_STORE_ADDRESS)) {
-        tableProperties.putIfAbsent(PROPS_BOOTSTRAP_SERVERS.key(), tableProperties.get(
-            TableProperties.LOG_STORE_ADDRESS));
-      }
-      tableProperties.putIfAbsent(
-          "properties.key.serializer",
-          "org.apache.kafka.common.serialization.ByteArraySerializer");
-      tableProperties.putIfAbsent(
-          "properties.value.serializer",
-          "org.apache.kafka.common.serialization.ByteArraySerializer");
-      tableProperties.putIfAbsent(
-          "properties.key.deserializer",
-          "org.apache.kafka.common.serialization.ByteArrayDeserializer");
-      tableProperties.putIfAbsent(
-          "properties.value.deserializer",
-          "org.apache.kafka.common.serialization.ByteArrayDeserializer");
     }
   }
 
@@ -294,7 +271,7 @@ public class ArcticCatalog extends AbstractCatalog {
     validateFlinkTable(table);
 
     TableSchema tableSchema = table.getSchema();
-    TableSchema.Builder b = TableSchema.builder();
+    TableSchema.Builder flinkSchemaBuilder = TableSchema.builder();
 
     tableSchema.getTableColumns().forEach(c -> {
       List<WatermarkSpec> ws = tableSchema.getWatermarkSpecs();
@@ -303,9 +280,12 @@ public class ArcticCatalog extends AbstractCatalog {
           return;
         }
       }
-      b.field(c.getName(), c.getType());
+      flinkSchemaBuilder.field(c.getName(), c.getType());
     });
-    TableSchema tableSchemaWithoutWatermark = b.build();
+    if (tableSchema.getPrimaryKey().isPresent()) {
+      flinkSchemaBuilder.primaryKey(tableSchema.getPrimaryKey().get().getColumns().toArray(new String[0]));
+    }
+    TableSchema tableSchemaWithoutWatermark = flinkSchemaBuilder.build();
 
     Schema icebergSchema = FlinkSchemaUtil.convert(tableSchemaWithoutWatermark);
 

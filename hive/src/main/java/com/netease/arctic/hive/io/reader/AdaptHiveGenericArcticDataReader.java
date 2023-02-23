@@ -21,8 +21,9 @@ package com.netease.arctic.hive.io.reader;
 import com.netease.arctic.data.DataTreeNode;
 import com.netease.arctic.iceberg.optimize.InternalRecordWrapper;
 import com.netease.arctic.io.ArcticFileIO;
-import com.netease.arctic.io.reader.BaseArcticDataReader;
+import com.netease.arctic.io.reader.AbstractArcticDataReader;
 import com.netease.arctic.table.PrimaryKeySpec;
+import com.netease.arctic.utils.map.StructLikeCollections;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.StructLike;
 import org.apache.iceberg.data.Record;
@@ -37,9 +38,24 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
- * Implementation of {@link BaseArcticDataReader} with record type {@link Record}.
+ * Implementation of {@link AbstractArcticDataReader} with record type {@link Record}.
  */
-public class AdaptHiveGenericArcticDataReader extends BaseArcticDataReader<Record> {
+public class AdaptHiveGenericArcticDataReader extends AbstractAdaptHiveArcticDataReader<Record> {
+
+  public AdaptHiveGenericArcticDataReader(
+      ArcticFileIO fileIO,
+      Schema tableSchema,
+      Schema projectedSchema,
+      PrimaryKeySpec primaryKeySpec,
+      String nameMapping,
+      boolean caseSensitive,
+      BiFunction<Type, Object, Object> convertConstant,
+      Set<DataTreeNode> sourceNodes,
+      boolean reuseContainer,
+      StructLikeCollections structLikeCollections) {
+    super(fileIO, tableSchema, projectedSchema, primaryKeySpec, nameMapping, caseSensitive, convertConstant,
+        sourceNodes, reuseContainer, structLikeCollections);
+  }
 
   public AdaptHiveGenericArcticDataReader(
       ArcticFileIO fileIO,

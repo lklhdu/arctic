@@ -32,10 +32,10 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.iceberg.Snapshot;
-import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -103,6 +103,7 @@ public class ArcticSourceEnumerator extends AbstractArcticEnumerator {
       this.temporalJoinSplits = enumState.temporalJoinSplits();
     }
     this.dimTable = dimTable;
+    LOG.info("dimTable: {}", dimTable);
   }
 
   @Override
@@ -175,6 +176,8 @@ public class ArcticSourceEnumerator extends AbstractArcticEnumerator {
     }
     if (!enumerationResult.isEmpty()) {
       splitAssigner.onDiscoveredSplits(enumerationResult.splits());
+    }
+    if (!enumerationResult.toOffset().isEmpty()) {
       enumeratorPosition.set(enumerationResult.toOffset());
     }
     LOG.info("handled result of splits, discover splits size {}, latest offset {}.",

@@ -26,6 +26,11 @@ import com.netease.arctic.flink.util.ArcticUtils;
 import com.netease.arctic.table.ArcticTable;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.api.common.state.ListState;
+import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.typeutils.base.LongSerializer;
+import org.apache.flink.runtime.state.StateInitializationContext;
+import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
@@ -66,7 +71,8 @@ public class ArcticFileWriter extends AbstractStreamOperator<WriteResult>
   private transient int subTaskId;
   private transient int attemptId;
   private transient String jobId;
-  private transient long checkpointId = 0;
+  private transient long checkpointId = 1;
+  private transient ListState<Long> checkpointState;
   /**
    * Load table in runtime, because that table's refresh method will be invoked in serialization.
    * And it will set {@link org.apache.hadoop.security.UserGroupInformation#authenticationMethod} to KERBEROS
@@ -94,7 +100,6 @@ public class ArcticFileWriter extends AbstractStreamOperator<WriteResult>
 
   @Override
   public void open() {
-    this.subTaskId = getRuntimeContext().getIndexOfThisSubtask();
     this.attemptId = getRuntimeContext().getAttemptNumber();
     this.jobId = getContainingTask().getEnvironment().getJobID().toString();
     table = ArcticUtils.loadArcticTable(tableLoader);
@@ -105,26 +110,44 @@ public class ArcticFileWriter extends AbstractStreamOperator<WriteResult>
     this.writer = table.io().doAs(taskWriterFactory::create);
   }
 
-  private void initTaskWriterFactory(Long mask) {
+  @Override
+  public void initializeState(StateInitializationContext context) throws Exception {
+    super.initializeState(context);
+
+    this.subTaskId = getRuntimeContext().getIndexOfThisSubtask();
+    checkpointState =
+        context.getOperatorStateStore()
+            .getListState(
+                new ListStateDescriptor<>(
+                    subTaskId + "-task-file-writer-state",
+                    LongSerializer.INSTANCE));
+
+    if (context.isRestored()) {
+      // get last success ckp num from state when failover continuously
+      checkpointId = checkpointState.get().iterator().next();
+      // prepare for the writer init in open(). It is used for next ckpId.
+      checkpointId++;
+    }
+  }
+
+  @Override
+  public void snapshotState(StateSnapshotContext context) throws Exception {
+    super.snapshotState(context);
+
+    checkpointState.clear();
+    checkpointState.add(context.getCheckpointId());
+  }
+
+  private void initTaskWriterFactory(long mask) {
     if (taskWriterFactory instanceof ArcticRowDataTaskWriterFactory) {
-      if (mask != null) {
-        ((ArcticRowDataTaskWriterFactory) taskWriterFactory).setMask(mask);
-      }
-      ((ArcticRowDataTaskWriterFactory) taskWriterFactory).setTransactionId(getTransactionId());
+      ((ArcticRowDataTaskWriterFactory) taskWriterFactory).setMask(mask);
     }
     taskWriterFactory.initialize(subTaskId, attemptId);
   }
 
-  private Long getTransactionId() {
-    Long transaction;
-    if (table.isKeyedTable()) {
-      String signature = BaseEncoding.base16().encode((jobId + checkpointId).getBytes());
-      transaction = table.asKeyedTable().beginTransaction(signature);
-      LOG.info("table:{}, signature:{}, transactionId:{}", table.name(), signature, transaction);
-    } else {
-      transaction = null;
-    }
-    return transaction;
+  @VisibleForTesting
+  public long getCheckpointId() {
+    return checkpointId;
   }
 
   private long getMask(int subTaskId) {
@@ -146,7 +169,8 @@ public class ArcticFileWriter extends AbstractStreamOperator<WriteResult>
 
   @Override
   public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
-    this.checkpointId = checkpointId;
+    // get ckpId for next cp writer
+    this.checkpointId = checkpointId + 1;
 
     table.io().doAs(() -> {
       completeAndEmitFiles();
@@ -177,9 +201,6 @@ public class ArcticFileWriter extends AbstractStreamOperator<WriteResult>
     RowData row = element.getValue();
     table.io().doAs(() -> {
       if (writer == null) {
-        // Reassign transaction id when processing the new file data to avoid the situation that there is no data
-        // written during the next checkpoint period.
-        initTaskWriterFactory(null);
         this.writer = taskWriterFactory.create();
       }
 

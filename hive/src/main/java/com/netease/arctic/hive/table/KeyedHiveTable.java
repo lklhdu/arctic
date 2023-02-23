@@ -22,16 +22,24 @@ import com.netease.arctic.AmsClient;
 import com.netease.arctic.ams.api.TableMeta;
 import com.netease.arctic.hive.HMSClientPool;
 import com.netease.arctic.hive.HiveTableProperties;
+import com.netease.arctic.hive.op.BaseSchemaUpdate;
 import com.netease.arctic.hive.utils.HiveMetaSynchronizer;
-import com.netease.arctic.table.BaseKeyedTable;
+import com.netease.arctic.io.ArcticFileIO;
+import com.netease.arctic.scan.ChangeTableBasicIncrementalScan;
+import com.netease.arctic.scan.ChangeTableIncrementalScan;
+import com.netease.arctic.table.BasicKeyedTable;
+import com.netease.arctic.table.BasicUnkeyedTable;
 import com.netease.arctic.table.ChangeTable;
 import com.netease.arctic.table.PrimaryKeySpec;
+import com.netease.arctic.table.TableIdentifier;
+import org.apache.iceberg.Table;
+import org.apache.iceberg.UpdateSchema;
 import org.apache.iceberg.util.PropertyUtil;
 
 /**
  * Implementation of {@link com.netease.arctic.table.KeyedTable} with Hive table as base store.
  */
-public class KeyedHiveTable extends BaseKeyedTable implements SupportHive {
+public class KeyedHiveTable extends BasicKeyedTable implements SupportHive {
 
   private final HMSClientPool hiveClient;
 
@@ -83,5 +91,24 @@ public class KeyedHiveTable extends BaseKeyedTable implements SupportHive {
   @Override
   public HMSClientPool getHMSClient() {
     return hiveClient;
+  }
+
+  public static class HiveChangeInternalTable extends BasicUnkeyedTable implements ChangeTable {
+
+    public HiveChangeInternalTable(
+        TableIdentifier tableIdentifier, Table changeIcebergTable, ArcticFileIO arcticFileIO,
+        AmsClient client) {
+      super(tableIdentifier, changeIcebergTable, arcticFileIO, client);
+    }
+
+    @Override
+    public UpdateSchema updateSchema() {
+      return new BaseSchemaUpdate(this, super.updateSchema());
+    }
+
+    @Override
+    public ChangeTableIncrementalScan newChangeScan() {
+      return new ChangeTableBasicIncrementalScan(this);
+    }
   }
 }

@@ -29,11 +29,11 @@ import com.netease.arctic.optimizer.operator.BaseTaskConsumer;
 import com.netease.arctic.optimizer.operator.BaseTaskExecutor;
 import com.netease.arctic.optimizer.operator.BaseTaskReporter;
 import com.netease.arctic.optimizer.operator.BaseToucher;
+import com.netease.arctic.optimizer.util.OptimizerUtil;
 import org.kohsuke.args4j.CmdLineException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nonnull;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
@@ -66,7 +66,7 @@ public class LocalOptimizer implements StatefulOptimizer {
   private ExecutorService executeThreadPool;
 
   private ScheduledExecutorService toucherService;
-  
+
   private volatile boolean stopped = false;
 
   public LocalOptimizer() {
@@ -85,7 +85,22 @@ public class LocalOptimizer implements StatefulOptimizer {
     JSONObject containerProperties = containerInfo.getJSONObject(OptimizerProperties.CONTAINER_PROPERTIES);
     JSONObject groupProperties = groupInfo.getJSONObject(OptimizerProperties.OPTIMIZER_GROUP_PROPERTIES);
 
-    //add compact execute config
+    // spill map config
+    Boolean enableSpillMap = groupProperties.getBoolean(OptimizerProperties.SPILLABLE_MAP_ENABLE);
+    String backendBaseDir = groupProperties.getString(OptimizerProperties.SPILLABLE_MAP_DIR);
+    Long maxDeleteMemorySize = groupProperties.getLong(OptimizerProperties.SPILLABLE_MEMORY_LIMIT);
+    String spillMapCmd = "";
+    if (enableSpillMap != null) {
+      spillMapCmd = spillMapCmd + " -es " + enableSpillMap;
+    }
+    if (backendBaseDir != null) {
+      spillMapCmd = spillMapCmd + " -rp " + backendBaseDir;
+    }
+    if (maxDeleteMemorySize != null) {
+      spillMapCmd = spillMapCmd + " -mm " + maxDeleteMemorySize;
+    }
+
+    // add compact execute config
     String amsUrl;
     if (systemInfo.containsKey(OptimizerProperties.HA_ENABLE) && systemInfo.getBoolean(OptimizerProperties.HA_ENABLE)) {
       amsUrl = String.format("zookeeper://%s/%s", systemInfo.getString(OptimizerProperties.ZOOKEEPER_SERVER).trim(),
@@ -101,19 +116,19 @@ public class LocalOptimizer implements StatefulOptimizer {
         OptimizerProperties.OPTIMIZER_GROUP_HEART_BEAT_INTERVAL_DEFAULT;
     int memory = groupProperties.getInteger("memory");
 
-    //start compact job
+    // start compact job
     String arcticHome = systemInfo.getString(OptimizerProperties.ARCTIC_HOME);
-    String cmd = String.format("%s/bin/localOptimize.sh %s %s %s %s %s %s", arcticHome, memory, amsUrl,
-        groupInfo.get("id"),
-        parallelism, heartBeatInterval, jobInfo.get(OptimizerProperties.OPTIMIZER_JOB_ID));
+    String cmd = String.format("%s/bin/localOptimize.sh -m %s -a %s -q %s -p %s -hb %s -id %s",
+        arcticHome, memory, amsUrl, groupInfo.get("id"),
+        parallelism, heartBeatInterval, jobInfo.get(OptimizerProperties.OPTIMIZER_JOB_ID)) + spillMapCmd;
     LOG.info("starting compact job use command:" + cmd);
     Runtime runtime = Runtime.getRuntime();
     try {
-      if (containerProperties.containsKey("hadoop_home")) {
+      if (containerProperties != null && containerProperties.containsKey("hadoop_home")) {
         String[] tmpCmd = {"/bin/sh", "-c", "export HADOOP_HOME=" + containerProperties.getString("hadoop_home")};
         runtime.exec(tmpCmd);
       }
-      if (containerProperties.containsKey("java_home")) {
+      if (containerProperties != null && containerProperties.containsKey("java_home")) {
         String[] tmpCmd = {"/bin/sh", "-c", "export JAVA_HOME=" + containerProperties.getString("java_home")};
         runtime.exec(tmpCmd);
       }
@@ -150,6 +165,10 @@ public class LocalOptimizer implements StatefulOptimizer {
 
   public static void main(String[] args) throws CmdLineException {
     OptimizerConfig optimizerConfig = new OptimizerConfig(args);
+    if (optimizerConfig.getOptimizerId() == null || optimizerConfig.getOptimizerId().isEmpty() ||
+        "unknown".equals(optimizerConfig.getOptimizerId())) {
+      OptimizerUtil.register(optimizerConfig);
+    }
     new LocalOptimizer().init(optimizerConfig);
     LOG.info("init LocalOptimizer with {}", optimizerConfig);
   }
@@ -174,7 +193,7 @@ public class LocalOptimizer implements StatefulOptimizer {
     toucherService.scheduleAtFixedRate(new Toucher(), 3000, config.getHeartBeat(), TimeUnit.MILLISECONDS);
     executeThreadPool.execute(new Executor());
   }
-  
+
   public void release() {
     this.stopped = true;
     if (executeThreadPool != null) {

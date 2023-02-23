@@ -50,6 +50,7 @@ public class ConfigFileProperties {
   public static final String CONTAINER_LIST = "containers";
   public static final String CONTAINER_NAME = "name";
   public static final String CONTAINER_TYPE = "type";
+  public static final String EXTERNAL_CONTAINER_TYPE = "external";
   public static final String CONTAINER_PROPERTIES = "properties";
 
   //optimize config
@@ -57,6 +58,9 @@ public class ConfigFileProperties {
   public static final String OPTIMIZE_GROUP_NAME = "name";
   public static final String OPTIMIZE_GROUP_CONTAINER = "container";
   public static final String OPTIMIZE_GROUP_PROPERTIES = "properties";
+  public static final String OPTIMIZE_SCHEDULING_POLICY = "scheduling_policy";
+  public static final String OPTIMIZE_SCHEDULING_POLICY_QUOTA = "quota";
+  public static final String OPTIMIZE_SCHEDULING_POLICY_BALANCED = "balanced";
 
   public static final String OPTIMIZE_GROUP_PARALLELISM = "parallelism";
   public static final String OPTIMIZE_GROUP_MEMORY = "memory";

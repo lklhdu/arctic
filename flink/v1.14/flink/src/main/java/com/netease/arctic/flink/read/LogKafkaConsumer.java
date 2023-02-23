@@ -19,6 +19,8 @@
 package com.netease.arctic.flink.read;
 
 import com.netease.arctic.flink.read.internals.AbstractFetcher;
+import com.netease.arctic.flink.read.source.log.kafka.LogKafkaSource;
+import com.netease.arctic.flink.util.CompatibleFlinkPropertyUtil;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.metrics.MetricGroup;
@@ -46,7 +48,10 @@ import static com.netease.arctic.flink.table.descriptors.ArcticValidator.ARCTIC_
 
 /**
  * An arctic log consumer that consume arctic log data from kafka.
+ * <p>
+ * @deprecated since 0.4.1, will be removed in 0.7.0; use {@link LogKafkaSource} instead.
  */
+@Deprecated
 public class LogKafkaConsumer extends FlinkKafkaConsumer<RowData> {
   private static final long serialVersionUID = 7855676094345921722L;
   private KafkaDeserializationSchemaWrapper<RowData> logRecordDeserializationSchemaWrapper;
@@ -65,7 +70,8 @@ public class LogKafkaConsumer extends FlinkKafkaConsumer<RowData> {
     super(topics, deserializer, props);
     this.logRecordDeserializationSchemaWrapper = deserializer;
     this.schema = schema;
-    this.logRetractionEnable = tableOptions.get(ARCTIC_LOG_CONSISTENCY_GUARANTEE_ENABLE);
+    this.logRetractionEnable = CompatibleFlinkPropertyUtil.propertyAsBoolean(tableOptions,
+        ARCTIC_LOG_CONSISTENCY_GUARANTEE_ENABLE);
     this.logConsumerChangelogMode = tableOptions.get(ARCTIC_LOG_CONSUMER_CHANGELOG_MODE);
     this.logReadHelper = new LogReadHelper();
   }
@@ -78,7 +84,8 @@ public class LogKafkaConsumer extends FlinkKafkaConsumer<RowData> {
       ReadableConfig tableOptions) {
     super(subscriptionPattern, deserializer, props);
     this.schema = schema;
-    this.logRetractionEnable = tableOptions.get(ARCTIC_LOG_CONSISTENCY_GUARANTEE_ENABLE);
+    this.logRetractionEnable = CompatibleFlinkPropertyUtil.propertyAsBoolean(tableOptions,
+        ARCTIC_LOG_CONSISTENCY_GUARANTEE_ENABLE);
     this.logConsumerChangelogMode = tableOptions.get(ARCTIC_LOG_CONSUMER_CHANGELOG_MODE);
     this.logReadHelper = new LogReadHelper();
   }

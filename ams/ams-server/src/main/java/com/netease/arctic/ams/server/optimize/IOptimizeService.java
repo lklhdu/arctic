@@ -27,6 +27,8 @@ import java.util.List;
 
 public interface IOptimizeService {
 
+  boolean isInited();
+
   /**
    * Check optimize check tasks, add tasks of new tables, and clean tasks of removed table.
    */
@@ -35,10 +37,16 @@ public interface IOptimizeService {
   /**
    * List cached tables in OptimizeService.
    *
-   * @param forceRefresh whether force refresh
    * @return table id list
    */
-  List<TableIdentifier> listCachedTables(boolean forceRefresh);
+  List<TableIdentifier> listCachedTables();
+
+  /**
+   * List and refresh cached tables in OptimizeService.
+   *
+   * @return table id list
+   */
+  List<TableIdentifier> refreshAndListTables();
 
   /**
    * Get TableOptimizeItem in OptimizeService.
@@ -65,6 +73,12 @@ public interface IOptimizeService {
    */
   List<OptimizeHistory> getOptimizeHistory(TableIdentifier tableIdentifier);
 
+  /**
+   * Get the latest commit time of a table
+   * @param identifier
+   * @return
+   */
+  Long getLatestCommitTime(TableIdentifier identifier);
 
   /**
    * Get max optimize history id.
@@ -79,7 +93,6 @@ public interface IOptimizeService {
    */
   boolean triggerOptimizeCommit(TableOptimizeItem tableOptimizeItem);
 
-
   /**
    * Take Table to commit, wait if no table is ready.
    * @return TableOptimizeItem -
@@ -87,9 +100,21 @@ public interface IOptimizeService {
   TableOptimizeItem takeTableToCommit() throws InterruptedException;
 
   /**
-   * expire and clean optimize history record
+   * Expire and clean optimize history record
    * @param tableIdentifier -
    * @param expireTime min timestamp which record need to retain
    */
   void expireOptimizeHistory(TableIdentifier tableIdentifier, long expireTime);
+
+  /**
+   * Add new tables into cache
+   * @param toAddTables -
+   */
+  void addNewTables(List<TableIdentifier> toAddTables);
+
+  /**
+   * Clear removed tables from cache
+   * @param toRemoveTables -
+   */
+  void clearRemovedTables(List<TableIdentifier> toRemoveTables);
 }

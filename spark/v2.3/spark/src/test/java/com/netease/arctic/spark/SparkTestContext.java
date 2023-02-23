@@ -30,6 +30,7 @@ import com.netease.arctic.data.ChangeAction;
 import com.netease.arctic.data.DataTreeNode;
 import com.netease.arctic.hive.HMSMockServer;
 import com.netease.arctic.hive.io.writer.AdaptHiveGenericTaskWriterBuilder;
+import com.netease.arctic.data.file.FileNameGenerator;
 import com.netease.arctic.io.writer.GenericTaskWriters;
 import com.netease.arctic.io.writer.SortedPosDeleteWriter;
 import com.netease.arctic.op.OverwriteBaseFiles;
@@ -38,8 +39,6 @@ import com.netease.arctic.table.KeyedTable;
 import com.netease.arctic.table.LocationKind;
 import com.netease.arctic.table.TableIdentifier;
 import com.netease.arctic.table.UnkeyedTable;
-import com.netease.arctic.utils.FileUtil;
-import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.iceberg.*;
@@ -107,7 +106,7 @@ public class SparkTestContext extends ExternalResource {
     }
 
     System.out.println("======================== start AMS  ========================= ");
-    FileUtils.deleteQuietly(testBaseDir);
+    org.apache.commons.io.FileUtils.deleteQuietly(testBaseDir);
     testBaseDir.mkdirs();
 
     AmsClientPools.cleanAll();
@@ -128,7 +127,7 @@ public class SparkTestContext extends ExternalResource {
 
     configs.put("spark.sql.catalogImplementation", "hive");
     configs.put("hive.metastore.uris", "thrift://127.0.0.1:" + hms.getMetastorePort());
-    configs.put("spark.arctic.sql.delegate.enable", "true");
+    configs.put("spark.sql.arctic.delegate.enabled", "true");
     //hive.metastore.client.capability.check
     configs.put("hive.metastore.client.capability.check", "false");
 
@@ -276,9 +275,7 @@ public class SparkTestContext extends ExternalResource {
 
   public static void writeChange(TableIdentifier identifier, ChangeAction action, List<Record> rows) {
     KeyedTable table = SparkTestContext.catalog(identifier.getCatalog()).loadTable(identifier).asKeyedTable();
-    long txId = table.beginTransaction(System.currentTimeMillis() + "");
     try (TaskWriter<Record> writer = GenericTaskWriters.builderFor(table)
-        .withTransactionId(txId)
         .withChangeAction(action)
         .buildChangeWriter()) {
       rows.forEach(row -> {
@@ -447,9 +444,13 @@ public class SparkTestContext extends ExternalResource {
 
   public List<DataFile> writeHive(ArcticTable table, LocationKind locationKind, List<Record> records)
       throws IOException {
+    Long txId = null;
+    if (table.isKeyedTable()) {
+      txId = table.asKeyedTable().beginTransaction(System.currentTimeMillis() + "");
+    }
     AdaptHiveGenericTaskWriterBuilder builder = AdaptHiveGenericTaskWriterBuilder
         .builderFor(table)
-        .withTransactionId(table.isKeyedTable() ? 1L : null);
+        .withTransactionId(txId);
 
     TaskWriter<Record> changeWrite = builder.buildWriter(locationKind);
     for (Record record : records) {
@@ -460,7 +461,7 @@ public class SparkTestContext extends ExternalResource {
       KeyedTable keyedTable = table.asKeyedTable();
       OverwriteBaseFiles overwriteBaseFiles = keyedTable.newOverwriteBaseFiles();
       Arrays.stream(dataFiles).forEach(overwriteBaseFiles::addFile);
-      overwriteBaseFiles.withTransactionId(keyedTable.beginTransaction(System.currentTimeMillis() + ""));
+      overwriteBaseFiles.updateOptimizedSequenceDynamically(txId);
       overwriteBaseFiles.commit();
     } else if (table.isUnkeyedTable()) {
       UnkeyedTable unkeyedTable = table.asUnkeyedTable();
@@ -483,7 +484,7 @@ public class SparkTestContext extends ExternalResource {
       List<DataFile> partitionFiles = dataFilePartitionMap.getValue();
       Map<DataTreeNode, List<DataFile>> nodeFilesPartitionMap = new HashMap<>(partitionFiles.stream()
           .collect(Collectors.groupingBy(dataFile ->
-              FileUtil.parseFileNodeFromFileName(dataFile.path().toString()))));
+              FileNameGenerator.parseFileNodeFromFileName(dataFile.path().toString()))));
       for (Map.Entry<DataTreeNode, List<DataFile>> nodeFilePartitionMap : nodeFilesPartitionMap.entrySet()) {
         DataTreeNode key = nodeFilePartitionMap.getKey();
         List<DataFile> nodeFiles = nodeFilePartitionMap.getValue();

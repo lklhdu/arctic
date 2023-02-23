@@ -62,7 +62,7 @@ public class ArcticKeyedSparkOverwriteWriter implements SupportsWriteInternalRow
 
   private final KeyedTable table;
   private final StructType dsSchema;
-  private final long transactionId;
+  private final long txId;
   private final String subDir;
   protected Expression overwriteExpr = null;
 
@@ -77,8 +77,8 @@ public class ArcticKeyedSparkOverwriteWriter implements SupportsWriteInternalRow
     }
     this.table = table;
     this.dsSchema = dsSchema;
-    this.transactionId = table.beginTransaction(null);
-    this.subDir = HiveTableUtil.newHiveSubdirectory(this.transactionId);
+    this.txId = table.beginTransaction(null);
+    this.subDir = HiveTableUtil.newHiveSubdirectory(this.txId);
   }
 
   @Override
@@ -103,7 +103,7 @@ public class ArcticKeyedSparkOverwriteWriter implements SupportsWriteInternalRow
 
   @Override
   public DataWriterFactory<InternalRow> createInternalRowWriterFactory() {
-    return new WriterFactory(table, dsSchema, transactionId, subDir);
+    return new WriterFactory(table, dsSchema, txId, subDir);
   }
 
   private static class WriterFactory implements DataWriterFactory, Serializable {
@@ -160,7 +160,7 @@ public class ArcticKeyedSparkOverwriteWriter implements SupportsWriteInternalRow
 
   private void rewritePartition(WriterCommitMessage[] messages) {
     RewritePartitions rewritePartitions = table.newRewritePartitions();
-    rewritePartitions.withTransactionId(transactionId);
+    rewritePartitions.updateOptimizedSequenceDynamically(txId);
 
     for (DataFile file : files(messages)) {
       rewritePartitions.addDataFile(file);
@@ -171,7 +171,7 @@ public class ArcticKeyedSparkOverwriteWriter implements SupportsWriteInternalRow
   private void overwriteByFilter(WriterCommitMessage[] messages, Expression overwriteExpr) {
     OverwriteBaseFiles overwriteBaseFiles = table.newOverwriteBaseFiles();
     overwriteBaseFiles.overwriteByRowFilter(overwriteExpr);
-    overwriteBaseFiles.withTransactionId(transactionId);
+    overwriteBaseFiles.updateOptimizedSequenceDynamically(txId);
 
     for (DataFile file : files(messages)) {
       overwriteBaseFiles.addFile(file);

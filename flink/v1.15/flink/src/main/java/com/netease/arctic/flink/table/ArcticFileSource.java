@@ -18,6 +18,7 @@
 
 package com.netease.arctic.flink.table;
 
+import com.netease.arctic.flink.util.CompatibleFlinkPropertyUtil;
 import com.netease.arctic.table.ArcticTable;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
@@ -51,7 +52,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
-import static com.netease.arctic.flink.FlinkSchemaUtil.addPrimaryKey;
 import static com.netease.arctic.flink.table.descriptors.ArcticValidator.DIM_TABLE_ENABLE;
 
 /**
@@ -140,7 +140,6 @@ public class ArcticFileSource implements ScanTableSource, SupportsFilterPushDown
           projectedColumns,
           Arrays.stream(projectedFields).mapToObj(i -> fullTypes[i]).toArray(DataType[]::new));
 
-      addPrimaryKey(builder, table, tableSchema, projectedColumns);
       TableSchema ts = builder.build();
       LOG.info("TableSchema builder after addPrimaryKey, schema:{}", ts);
       return ts;
@@ -218,7 +217,7 @@ public class ArcticFileSource implements ScanTableSource, SupportsFilterPushDown
   @Override
   public void applyWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
     Configuration conf = Configuration.fromMap(table.properties());
-    boolean dimTable = conf.get(DIM_TABLE_ENABLE);
+    boolean dimTable = CompatibleFlinkPropertyUtil.propertyAsBoolean(conf, DIM_TABLE_ENABLE);
     if (!dimTable) {
       this.watermarkStrategy = watermarkStrategy;
     }

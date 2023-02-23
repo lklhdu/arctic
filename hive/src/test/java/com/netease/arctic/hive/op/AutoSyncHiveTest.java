@@ -29,7 +29,7 @@ import com.netease.arctic.hive.utils.HiveSchemaUtil;
 import com.netease.arctic.table.ArcticTable;
 import com.netease.arctic.table.LocationKind;
 import com.netease.arctic.table.UnkeyedTable;
-import com.netease.arctic.utils.FileUtil;
+import com.netease.arctic.utils.TableFileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -58,7 +58,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class AutoSyncHiveTest extends HiveTableTestBase {
-
 
   @Test
   public void testAutoSyncHiveSchemaChange() throws TException {
@@ -129,7 +128,7 @@ public class AutoSyncHiveTest extends HiveTableTestBase {
         writeRecords("p3"));
     dataFiles.addAll(newFiles);
     Partition newPartition = HivePartitionUtil.newPartition(hiveTable, Lists.newArrayList("p3"),
-        FileUtil.getFileDir(newFiles.get(0).path().toString()), newFiles,
+        TableFileUtils.getFileDir(newFiles.get(0).path().toString()), newFiles,
         (int) (System.currentTimeMillis() / 1000));
     newPartition.getParameters().remove(HiveTableProperties.ARCTIC_TABLE_FLAG);
     hms.getClient().add_partition(newPartition);
@@ -150,11 +149,11 @@ public class AutoSyncHiveTest extends HiveTableTestBase {
 
     ImmutableList.Builder<Record> builder = ImmutableList.builder();
     for (String partitionValue : partitionValues) {
-      builder.add(record.copy(ImmutableMap.of("id", 1, "name", partitionValue,
-          "op_time", LocalDateTime.of(2022, 1, 1, 12, 0, 0),
-          "op_time_with_zone", OffsetDateTime.of(
+      builder.add(record.copy(ImmutableMap.of(COLUMN_NAME_ID, 1, COLUMN_NAME_NAME, partitionValue,
+          COLUMN_NAME_OP_TIME, LocalDateTime.of(2022, 1, 1, 12, 0, 0),
+          COLUMN_NAME_OP_TIME_WITH_ZONE, OffsetDateTime.of(
               LocalDateTime.of(2022, 1, 1, 12, 0, 0), ZoneOffset.UTC),
-          "d", new BigDecimal("100"))));
+          COLUMN_NAME_D, new BigDecimal("100"))));
     }
     return builder.build();
   }

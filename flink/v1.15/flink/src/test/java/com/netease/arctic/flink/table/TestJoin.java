@@ -100,7 +100,7 @@ public class TestJoin extends FlinkTestBase {
 
     sql(String.format("CREATE CATALOG arcticCatalog WITH %s", toWithClause(props)));
     Map<String, String> tableProperties = new HashMap<>();
-    tableProperties.put(LOCATION, tableDir.getAbsolutePath());
+    tableProperties.put(LOCATION, tableDir.getAbsolutePath() + "/" + TABLE);
     String table = String.format("arcticCatalog.%s.%s", DB, TABLE);
 
     String sql = String.format("CREATE TABLE IF NOT EXISTS %s (" +
@@ -111,7 +111,7 @@ public class TestJoin extends FlinkTestBase {
     sql("create table d (op_time timestamp(3), watermark for op_time as op_time) like %s", table);
 
     TableResult result = exec("select u.name, u.id, dim.info, dim.name dname from `user` as u left join d " +
-        "/*+OPTIONS('streaming'='true', 'dim-table.enable'='true')*/ for system_time as of u.op_time as dim" +
+        "/*+OPTIONS('streaming'='true', 'dim-table.enabled'='true')*/ for system_time as of u.op_time as dim" +
         " on u.id = dim.id");
 
     CommonTestUtils.waitForJobStatus(result.getJobClient().get(), Lists.newArrayList(JobStatus.RUNNING));
@@ -157,7 +157,7 @@ public class TestJoin extends FlinkTestBase {
 
     sql(String.format("CREATE CATALOG arcticCatalog WITH %s", toWithClause(props)));
     Map<String, String> tableProperties = new HashMap<>();
-    tableProperties.put(LOCATION, tableDir.getAbsolutePath());
+    tableProperties.put(LOCATION, tableDir.getAbsolutePath() + "/" + TABLE);
     String table = String.format("arcticCatalog.%s.%s", DB, TABLE);
 
     String sql = String.format("CREATE TABLE IF NOT EXISTS %s (" +
@@ -173,7 +173,7 @@ public class TestJoin extends FlinkTestBase {
     RowType rowType = (RowType) flinkSchema.toRowDataType().getLogicalType();
     KeyedTable keyedTable = (KeyedTable) ArcticUtils.loadArcticTable(
         ArcticTableLoader.of(TableIdentifier.of(TEST_CATALOG_NAME, DB, TABLE), catalogBuilder));
-    TaskWriter<RowData> taskWriter = createKeyedTaskWriter(keyedTable, rowType, 1, true);
+    TaskWriter<RowData> taskWriter = createKeyedTaskWriter(keyedTable, rowType, true);
     List<RowData> baseData = new ArrayList<RowData>() {{
       add(GenericRowData.ofKind(
           RowKind.INSERT, 123, 1L, StringData.fromString("a")));
@@ -189,12 +189,12 @@ public class TestJoin extends FlinkTestBase {
     }
     commit(keyedTable, taskWriter.complete(), true);
 
-    writeChange(keyedTable, rowType, 1);
+    writeChange(keyedTable, rowType);
 
     sql("create table d (op_time timestamp(3), watermark for op_time as op_time) like %s", table);
 
     TableResult result = exec("select u.name, u.id, dim.info, dim.name dname from `user` as u left join d " +
-        "/*+OPTIONS('streaming'='true', 'dim-table.enable'='true')*/ for system_time as of u.op_time as dim" +
+        "/*+OPTIONS('streaming'='true', 'dim-table.enabled'='true')*/ for system_time as of u.op_time as dim" +
         " on u.id = dim.id");
 
     CommonTestUtils.waitForJobStatus(result.getJobClient().get(), Lists.newArrayList(JobStatus.RUNNING));
@@ -220,8 +220,8 @@ public class TestJoin extends FlinkTestBase {
     Assert.assertEquals(DataUtil.toRowSet(expected), actual);
   }
 
-  private void writeChange(KeyedTable keyedTable, RowType rowType, long tranctionId) {
-    TaskWriter<RowData> taskWriter = createKeyedTaskWriter(keyedTable, rowType, tranctionId, false);
+  private void writeChange(KeyedTable keyedTable, RowType rowType) {
+    TaskWriter<RowData> taskWriter = createKeyedTaskWriter(keyedTable, rowType, false);
     List<RowData> data = new ArrayList<RowData>() {{
       add(GenericRowData.ofKind(
           RowKind.INSERT, 324, 5L, StringData.fromString("john")));

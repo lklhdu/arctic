@@ -25,11 +25,13 @@
     <parent>
         <groupId>com.netease.arctic</groupId>
         <artifactId>arctic-ams</artifactId>
-        <version>0.3.2-SNAPSHOT</version>
+        <version>0.5.0-SNAPSHOT</version>
     </parent>
 
     <artifactId>arctic-ams-server</artifactId>
     <packaging>jar</packaging>
+    <name>Arctic Project AMS Server</name>
+    <url>https://arctic.netease.com</url>
 
     <properties>
         <powermock.version>2.0.2</powermock.version>
@@ -167,7 +169,7 @@
 
         <dependency>
             <groupId>com.netease.arctic</groupId>
-            <artifactId>arctic-spark_3.1</artifactId>
+            <artifactId>arctic-spark-3.1</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -224,13 +226,6 @@
         </dependency>
 
         <dependency>
-            <groupId>org.powermock</groupId>
-            <artifactId>powermock-module-junit4</artifactId>
-            <version>${powermock.version}</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
             <groupId>com.netease.arctic</groupId>
             <artifactId>arctic-core</artifactId>
             <version>${project.version}</version>
@@ -258,6 +253,7 @@
             <version>${powermock.version}</version>
             <scope>test</scope>
         </dependency>
+
         <dependency>
             <groupId>org.powermock</groupId>
             <artifactId>powermock-api-mockito2</artifactId>
@@ -380,11 +376,6 @@
             <version>${websocket.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.eclipse.jetty.websocket</groupId>
-            <artifactId>websocket-api</artifactId>
-            <version>${websocket.version}</version>
-        </dependency>
-        <dependency>
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-stdlib</artifactId>
             <version>${kotlin.version}</version>
@@ -411,7 +402,7 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>RELEASE</version>
+            <version>5.9.1</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -476,7 +467,7 @@
         <dependency>
             <groupId>org.apache.parquet</groupId>
             <artifactId>parquet-hadoop</artifactId>
-            <version>${parquet.version}</version>
+            <version>${parquet-hadoop.version}</version>
         </dependency>
 
         <dependency>
@@ -521,6 +512,14 @@
                 </exclusion>
             </exclusions>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.kyuubi</groupId>
+            <artifactId>kyuubi-hive-jdbc-shaded</artifactId>
+            <version>1.6.0-incubating</version>
+        </dependency>
+
+
     </dependencies>
 
     <build>
@@ -541,7 +540,7 @@
                 <configuration>
                     <dotGitDirectory>${project.basedir}/.git</dotGitDirectory>
                     <generateGitPropertiesFile>true</generateGitPropertiesFile>
-                    <generateGitPropertiesFilename>${build.outputDirectory}/arctic/git.properties</generateGitPropertiesFilename>
+                    <generateGitPropertiesFilename>${project.build.outputDirectory}/arctic/git.properties</generateGitPropertiesFilename>
                     <includeOnlyProperties>
                         <includeOnlyProperty>^git.build.(time|version)$</includeOnlyProperty>
                         <includeOnlyProperty>^git.commit.id.(abbrev|full)$</includeOnlyProperty>
@@ -577,6 +576,13 @@
                         <include>**/AmsTestBase.java</include>
                         <include>**/OutAmsTestBase.java</include>
                     </includes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-deploy-plugin</artifactId>
+                <configuration>
+                    <skip>true</skip>
                 </configuration>
             </plugin>
         </plugins>

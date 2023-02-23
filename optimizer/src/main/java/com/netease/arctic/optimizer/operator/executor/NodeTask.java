@@ -12,7 +12,7 @@
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and 
+ * See the License for the specific language governing permissions and
  * limitations under the License.
  */
 
@@ -23,10 +23,14 @@ import com.netease.arctic.ams.api.OptimizeTaskId;
 import com.netease.arctic.ams.api.OptimizeType;
 import com.netease.arctic.data.DataFileType;
 import com.netease.arctic.data.DataTreeNode;
+import com.netease.arctic.data.DefaultKeyedFile;
+import com.netease.arctic.data.PrimaryKeyedFile;
+import com.netease.arctic.data.file.ContentFileWithSequence;
+import com.netease.arctic.data.file.DataFileWithSequence;
+import com.netease.arctic.data.file.DeleteFileWithSequence;
 import com.netease.arctic.table.TableIdentifier;
+import org.apache.commons.compress.utils.Lists;
 import org.apache.iceberg.ContentFile;
-import org.apache.iceberg.DataFile;
-import org.apache.iceberg.DeleteFile;
 import org.apache.iceberg.StructLike;
 import org.apache.iceberg.relocated.com.google.common.base.MoreObjects;
 import org.slf4j.Logger;
@@ -38,20 +42,55 @@ import java.util.Set;
 
 public class NodeTask {
   private static final Logger LOG = LoggerFactory.getLogger(NodeTask.class);
-  private final List<ContentFile<?>> allFiles = new ArrayList<>();
-  private final List<DataFile> dataFiles = new ArrayList<>();
-  private final List<DataFile> baseFiles = new ArrayList<>();
-  private final List<DataFile> insertFiles = new ArrayList<>();
-  private final List<DataFile> deleteFiles = new ArrayList<>();
-  private final List<DeleteFile> posDeleteFiles = new ArrayList<>();
+  private List<ContentFile<?>> allFiles;
+  private List<PrimaryKeyedFile> dataFiles;
+  private final List<PrimaryKeyedFile> baseFiles = new ArrayList<>();
+  private final List<PrimaryKeyedFile> insertFiles = new ArrayList<>();
+  private final List<PrimaryKeyedFile> deleteFiles = new ArrayList<>();
+  private final List<DeleteFileWithSequence> posDeleteFiles = new ArrayList<>();
+  private final List<DataFileWithSequence> icebergDataFiles = new ArrayList<>();
+  private final List<DataFileWithSequence> icebergSmallDataFiles = new ArrayList<>();
+  private final List<DeleteFileWithSequence> icebergEqDeleteFiles = new ArrayList<>();
+  private final List<DeleteFileWithSequence> icebergPosDeleteFiles = new ArrayList<>();
   private Set<DataTreeNode> sourceNodes;
   private StructLike partition;
   private OptimizeTaskId taskId;
   private TableIdentifier tableIdentifier;
   private int attemptId;
   private String customHiveSubdirectory;
+  private Long maxExecuteTime;
 
-  public NodeTask() {
+  public NodeTask(List<ContentFileWithSequence<?>> baseFiles,
+      List<ContentFileWithSequence<?>> insertFiles,
+      List<ContentFileWithSequence<?>> eqDeletes,
+      List<ContentFileWithSequence<?>> posDeletes, boolean isMixed) {
+    if (isMixed) {
+      if (baseFiles != null) {
+        baseFiles.forEach(s -> addFile(s, DataFileType.BASE_FILE));
+      }
+      if (insertFiles != null) {
+        insertFiles.forEach(s -> addFile(s, DataFileType.INSERT_FILE));
+      }
+      if (eqDeletes != null) {
+        eqDeletes.forEach(s -> addFile(s, DataFileType.EQ_DELETE_FILE));
+      }
+      if (posDeletes != null) {
+        posDeletes.forEach(s -> addFile(s, DataFileType.POS_DELETE_FILE));
+      }
+    } else {
+      if (baseFiles != null) {
+        baseFiles.forEach(s -> addIcebergFile(s, DataFileType.BASE_FILE));
+      }
+      if (insertFiles != null) {
+        insertFiles.forEach(s -> addIcebergFile(s, DataFileType.INSERT_FILE));
+      }
+      if (eqDeletes != null) {
+        eqDeletes.forEach(s -> addIcebergFile(s, DataFileType.EQ_DELETE_FILE));
+      }
+      if (posDeletes != null) {
+        posDeletes.forEach(s -> addIcebergFile(s, DataFileType.POS_DELETE_FILE));
+      }
+    }
   }
 
   public StructLike getPartition() {
@@ -62,7 +101,7 @@ public class NodeTask {
     this.partition = partition;
   }
 
-  public void addFile(ContentFile<?> file, DataFileType fileType) {
+  private void addFile(ContentFileWithSequence<?> file, DataFileType fileType) {
     if (fileType == null) {
       LOG.warn("file type is null");
       return;
@@ -70,16 +109,16 @@ public class NodeTask {
 
     switch (fileType) {
       case BASE_FILE:
-        baseFiles.add((DataFile) file);
+        baseFiles.add(DefaultKeyedFile.parseBase((DataFileWithSequence) file));
         break;
       case INSERT_FILE:
-        insertFiles.add((DataFile) file);
+        insertFiles.add(DefaultKeyedFile.parseChange((DataFileWithSequence) file, file.getSequenceNumber()));
         break;
       case EQ_DELETE_FILE:
-        deleteFiles.add((DataFile) file);
+        deleteFiles.add(DefaultKeyedFile.parseChange((DataFileWithSequence) file, file.getSequenceNumber()));
         break;
       case POS_DELETE_FILE:
-        posDeleteFiles.add((DeleteFile) file);
+        posDeleteFiles.add((DeleteFileWithSequence) file);
         break;
       default:
         LOG.warn("file type is {}, not add in node", fileType);
@@ -87,36 +126,96 @@ public class NodeTask {
     }
   }
 
-  public List<DataFile> dataFiles() {
-    dataFiles.clear();
-    Iterables.addAll(dataFiles, baseFiles);
-    Iterables.addAll(dataFiles, insertFiles);
+  private void addIcebergFile(ContentFileWithSequence contentFile, DataFileType fileType) {
+    if (fileType == null) {
+      LOG.warn("file type is null");
+      return;
+    }
+
+    switch (fileType) {
+      case BASE_FILE:
+        icebergDataFiles.add((DataFileWithSequence) contentFile);
+        break;
+      case INSERT_FILE:
+        icebergSmallDataFiles.add((DataFileWithSequence) contentFile);
+        break;
+      case ICEBERG_EQ_DELETE_FILE:
+      case EQ_DELETE_FILE:
+        icebergEqDeleteFiles.add((DeleteFileWithSequence) contentFile);
+        break;
+      case POS_DELETE_FILE:
+        icebergPosDeleteFiles.add((DeleteFileWithSequence) contentFile);
+        break;
+      default:
+        LOG.warn("file type is {}, not add in node", fileType);
+        // ignore the object
+    }
+  }
+
+  public List<PrimaryKeyedFile> dataFiles() {
+    if (dataFiles == null) {
+      dataFiles = Lists.newArrayList();
+      Iterables.addAll(dataFiles, baseFiles);
+      Iterables.addAll(dataFiles, insertFiles);
+    }
     return dataFiles;
   }
 
   public List<ContentFile<?>> files() {
-    allFiles.clear();
-    Iterables.addAll(allFiles, baseFiles);
-    Iterables.addAll(allFiles, insertFiles);
-    Iterables.addAll(allFiles, deleteFiles);
-    Iterables.addAll(allFiles, posDeleteFiles);
+    if (allFiles == null) {
+      allFiles = Lists.newArrayList();
+      Iterables.addAll(allFiles, baseFiles);
+      Iterables.addAll(allFiles, insertFiles);
+      Iterables.addAll(allFiles, deleteFiles);
+      Iterables.addAll(allFiles, posDeleteFiles);
+      for (ContentFileWithSequence<?> icebergDataFile : icebergDataFiles) {
+        allFiles.add(icebergDataFile);
+      }
+      for (ContentFileWithSequence<?> icebergDataFile : icebergSmallDataFiles) {
+        allFiles.add(icebergDataFile);
+      }
+      for (ContentFileWithSequence<?> icebergDataFile : icebergEqDeleteFiles) {
+        allFiles.add(icebergDataFile);
+      }
+      for (ContentFileWithSequence<?> icebergDataFile : icebergPosDeleteFiles) {
+        allFiles.add(icebergDataFile);
+      }
+    }
     return allFiles;
   }
 
-  public List<DataFile> baseFiles() {
+  public List<PrimaryKeyedFile> baseFiles() {
     return baseFiles;
   }
 
-  public List<DataFile> insertFiles() {
+  public List<PrimaryKeyedFile> insertFiles() {
     return insertFiles;
   }
 
-  public List<DataFile> deleteFiles() {
+  public List<PrimaryKeyedFile> deleteFiles() {
     return deleteFiles;
   }
 
-  public List<DeleteFile> posDeleteFiles() {
+  public List<DeleteFileWithSequence> posDeleteFiles() {
     return posDeleteFiles;
+  }
+
+  public List<DataFileWithSequence> icebergDataFiles() {
+    return icebergDataFiles;
+  }
+
+  public List<DataFileWithSequence> allIcebergDataFiles() {
+    List<DataFileWithSequence> allIcebergDataFiles = Lists.newArrayList();
+    allIcebergDataFiles.addAll(icebergDataFiles);
+    allIcebergDataFiles.addAll(icebergSmallDataFiles);
+    return allIcebergDataFiles;
+  }
+
+  public List<DeleteFileWithSequence> allIcebergDeleteFiles() {
+    List<DeleteFileWithSequence> allIcebergDeleteFiles = Lists.newArrayList();
+    allIcebergDeleteFiles.addAll(icebergEqDeleteFiles);
+    allIcebergDeleteFiles.addAll(icebergPosDeleteFiles);
+    return allIcebergDeleteFiles;
   }
 
   public Set<DataTreeNode> getSourceNodes() {
@@ -159,9 +258,18 @@ public class NodeTask {
     this.customHiveSubdirectory = customHiveSubdirectory;
   }
 
+  public Long getMaxExecuteTime() {
+    return maxExecuteTime;
+  }
+
+  public void setMaxExecuteTime(Long maxExecuteTime) {
+    this.maxExecuteTime = maxExecuteTime;
+  }
+
   public OptimizeType getOptimizeType() {
     return taskId.getType();
   }
+
 
   @Override
   public String toString() {
@@ -173,7 +281,12 @@ public class NodeTask {
         .add("insertFiles", insertFiles.size())
         .add("deleteFiles", deleteFiles.size())
         .add("posDeleteFiles", posDeleteFiles.size())
+        .add("icebergDataFiles", icebergDataFiles.size())
+        .add("icebergSmallDataFiles", icebergSmallDataFiles.size())
+        .add("icebergEqDeleteFiles", icebergEqDeleteFiles.size())
+        .add("icebergPosDeleteFiles", icebergPosDeleteFiles.size())
         .add("customHiveSubdirectory", customHiveSubdirectory)
+        .add("maxExecuteTime", maxExecuteTime)
         .toString();
   }
 }

@@ -21,7 +21,6 @@ package com.netease.arctic.flink.table;
 import com.netease.arctic.flink.util.ArcticUtils;
 import com.netease.arctic.flink.write.FlinkSink;
 import com.netease.arctic.table.ArcticTable;
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.connector.ChangelogMode;
@@ -29,7 +28,6 @@ import org.apache.flink.table.connector.sink.DataStreamSinkProvider;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsOverwrite;
 import org.apache.flink.table.connector.sink.abilities.SupportsPartitioning;
-import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.RowKind;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
@@ -50,18 +48,15 @@ public class ArcticDynamicSink implements DynamicTableSink, SupportsPartitioning
 
   private final ArcticTableLoader tableLoader;
   private final CatalogTable flinkTable;
-  private final String topic;
   private final boolean primaryKeyExisted;
   private boolean overwrite = false;
 
   ArcticDynamicSink(
       CatalogTable flinkTable,
       ArcticTableLoader tableLoader,
-      String topic,
       boolean primaryKeyExisted) {
     this.tableLoader = tableLoader;
     this.flinkTable = flinkTable;
-    this.topic = topic;
     this.primaryKeyExisted = primaryKeyExisted;
   }
 
@@ -79,15 +74,12 @@ public class ArcticDynamicSink implements DynamicTableSink, SupportsPartitioning
   @Override
   public SinkRuntimeProvider getSinkRuntimeProvider(Context context) {
     ArcticTable table = ArcticUtils.loadArcticTable(tableLoader);
-    Properties producerConfig = getKafkaProperties(table.properties());
 
     return (DataStreamSinkProvider) dataStream -> {
       DataStreamSink<?> ds = FlinkSink
           .forRowData(dataStream)
           .table(table)
           .flinkSchema(flinkTable.getSchema())
-          .producerConfig(producerConfig)
-          .topic(topic)
           .tableLoader(tableLoader)
           .overwrite(overwrite)
           .build();
