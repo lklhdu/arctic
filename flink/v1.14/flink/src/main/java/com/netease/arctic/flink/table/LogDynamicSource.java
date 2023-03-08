@@ -20,10 +20,13 @@ package com.netease.arctic.flink.table;
 
 import com.netease.arctic.flink.read.source.log.kafka.LogKafkaSource;
 import com.netease.arctic.flink.read.source.log.kafka.LogKafkaSourceBuilder;
+import com.netease.arctic.flink.read.source.log.pulsar.LogPulsarSource;
+import com.netease.arctic.flink.read.source.log.pulsar.LogPulsarSourceBuilder;
 import com.netease.arctic.flink.util.CompatibleFlinkPropertyUtil;
 import com.netease.arctic.table.ArcticTable;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -31,11 +34,15 @@ import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
+import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.util.Preconditions;
 import org.apache.iceberg.Schema;
-import org.apache.iceberg.types.Types;
+import org.apache.iceberg.types.Types.NestedField;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.util.Arrays;
@@ -48,12 +55,17 @@ import static com.netease.arctic.flink.table.descriptors.ArcticValidator.ARCTIC_
 import static com.netease.arctic.flink.table.descriptors.ArcticValidator.ARCTIC_LOG_CONSUMER_CHANGELOG_MODE;
 import static com.netease.arctic.flink.table.descriptors.ArcticValidator.LOG_CONSUMER_CHANGELOG_MODE_ALL_KINDS;
 import static com.netease.arctic.flink.table.descriptors.ArcticValidator.LOG_CONSUMER_CHANGELOG_MODE_APPEND_ONLY;
+import static com.netease.arctic.table.TableProperties.LOG_STORE_STORAGE_TYPE_DEFAULT;
+import static com.netease.arctic.table.TableProperties.LOG_STORE_STORAGE_TYPE_KAFKA;
+import static com.netease.arctic.table.TableProperties.LOG_STORE_STORAGE_TYPE_PULSAR;
+import static com.netease.arctic.table.TableProperties.LOG_STORE_TYPE;
 import static org.apache.flink.table.connector.ChangelogMode.insertOnly;
 
 /**
  * This is a log source table api, create log queue consumer e.g. {@link LogKafkaSource}
  */
-public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushDown {
+public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushDown, SupportsProjectionPushDown {
+  private static final Logger LOG = LoggerFactory.getLogger(LogDynamicSource.class);
 
   private final ArcticTable arcticTable;
   private final Schema schema;
@@ -71,7 +83,7 @@ public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushD
   /**
    * Indices that determine the value fields and the target position in the produced row.
    */
-  protected final int[] valueProjection;
+  protected int[] projectedFields;
 
   /**
    * Properties for the logStore consumer.
@@ -86,7 +98,6 @@ public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushD
       .build();
 
   public LogDynamicSource(
-      int[] valueProjection,
       Properties properties,
       Schema schema,
       ReadableConfig tableOptions,
@@ -97,12 +108,10 @@ public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushD
     this.logRetractionEnable = CompatibleFlinkPropertyUtil.propertyAsBoolean(arcticTable.properties(),
         ARCTIC_LOG_CONSISTENCY_GUARANTEE_ENABLE.key(), ARCTIC_LOG_CONSISTENCY_GUARANTEE_ENABLE.defaultValue());
     this.arcticTable = arcticTable;
-    this.valueProjection = valueProjection;
     this.properties = properties;
   }
 
   public LogDynamicSource(
-      int[] valueProjection,
       Properties properties,
       Schema schema,
       ReadableConfig tableOptions,
@@ -114,21 +123,29 @@ public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushD
     this.consumerChangelogMode = consumerChangelogMode;
     this.logRetractionEnable = logRetractionEnable;
     this.arcticTable = arcticTable;
-    this.valueProjection = valueProjection;
     this.properties = properties;
   }
 
   protected LogKafkaSource createKafkaSource() {
-    Schema projectedSchema = schema;
-    if (valueProjection != null) {
-      final List<Types.NestedField> columns = schema.columns();
-      projectedSchema = new Schema(Arrays.stream(valueProjection).mapToObj(columns::get).collect(Collectors.toList()));
-    }
+    Schema projectedSchema = getProjectSchema(schema);
+    LOG.info("Schema used for create KafkaSource is: {}", projectedSchema);
 
     LogKafkaSourceBuilder kafkaSourceBuilder = LogKafkaSource.builder(projectedSchema, arcticTable.properties());
     kafkaSourceBuilder.setProperties(properties);
 
+    LOG.info("build log kafka source");
     return kafkaSourceBuilder.build();
+  }
+
+  protected LogPulsarSource createPulsarSource() {
+    Schema projectedSchema = getProjectSchema(schema);
+    LOG.info("Schema used for create PulsarSource is: {}", projectedSchema);
+
+    LogPulsarSourceBuilder pulsarSourceBuilder = LogPulsarSource.builder(projectedSchema, arcticTable.properties());
+    pulsarSourceBuilder.setProperties(properties);
+
+    LOG.info("build log pulsar source");
+    return pulsarSourceBuilder.build();
   }
 
   @Override
@@ -158,9 +175,22 @@ public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushD
     }
   }
 
+  private Source<RowData, ?, ?> buildLogSource() {
+    String logType = CompatibleFlinkPropertyUtil.propertyAsString(arcticTable.properties(),
+        LOG_STORE_TYPE, LOG_STORE_STORAGE_TYPE_DEFAULT).toLowerCase();
+    switch (logType) {
+      case LOG_STORE_STORAGE_TYPE_KAFKA:
+        return createKafkaSource();
+      case LOG_STORE_STORAGE_TYPE_PULSAR:
+        return createPulsarSource();
+      default:
+        throw new UnsupportedOperationException("only support 'kafka' or 'pulsar' now, but input is " + logType);
+    }
+  }
+
   @Override
   public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
-    final LogKafkaSource kafkaSource = createKafkaSource();
+    final Source<RowData, ?, ?> logSource = buildLogSource();
 
     return new DataStreamScanProvider() {
       @Override
@@ -169,12 +199,12 @@ public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushD
           watermarkStrategy = WatermarkStrategy.noWatermarks();
         }
         return execEnv.fromSource(
-            kafkaSource, watermarkStrategy, "LogStoreSource-" + arcticTable.name());
+            logSource, watermarkStrategy, "LogStoreSource-" + arcticTable.name());
       }
 
       @Override
       public boolean isBounded() {
-        return kafkaSource.getBoundedness() == Boundedness.BOUNDED;
+        return logSource.getBoundedness() == Boundedness.BOUNDED;
       }
     };
   }
@@ -182,7 +212,6 @@ public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushD
   @Override
   public DynamicTableSource copy() {
     return new LogDynamicSource(
-        this.valueProjection,
         this.properties,
         this.schema,
         this.tableOptions,
@@ -199,5 +228,30 @@ public class LogDynamicSource implements ScanTableSource, SupportsWatermarkPushD
   @Override
   public void applyWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
     this.watermarkStrategy = watermarkStrategy;
+  }
+
+  @Override
+  public boolean supportsNestedProjection() {
+    return false;
+  }
+
+  @Override
+  public void applyProjection(int[][] projectFields) {
+    this.projectedFields = new int[projectFields.length];
+    for (int i = 0; i < projectFields.length; i++) {
+      Preconditions.checkArgument(projectFields[i].length == 1,
+          "Don't support nested projection now.");
+      this.projectedFields[i] = projectFields[i][0];
+    }
+  }
+
+  private Schema getProjectSchema(Schema projectedSchema) {
+    if (projectedFields != null) {
+      List<NestedField> projectedSchemaColumns = projectedSchema.columns();
+      projectedSchema = new Schema(Arrays.stream(projectedFields)
+        .mapToObj(projectedSchemaColumns::get)
+        .collect(Collectors.toList()));
+    }
+    return projectedSchema;
   }
 }
