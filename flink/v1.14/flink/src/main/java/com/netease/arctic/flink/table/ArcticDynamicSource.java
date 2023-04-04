@@ -18,32 +18,45 @@
 
 package com.netease.arctic.flink.table;
 
+import com.netease.arctic.flink.lookup.ArcticLookupFunction;
+import com.netease.arctic.flink.util.FilterUtil;
+import com.netease.arctic.flink.util.IcebergAndFlinkFilters;
 import com.netease.arctic.table.ArcticTable;
+import com.netease.arctic.utils.SchemaUtil;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.DataStreamScanProvider;
 import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource;
+import org.apache.flink.table.connector.source.TableFunctionProvider;
 import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.iceberg.Schema;
+import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+
+import static com.netease.arctic.flink.table.descriptors.ArcticValidator.LOOKUP_CACHE_MAX_ROWS;
 
 /**
  * Flink table api that generates source operators.
  */
 public class ArcticDynamicSource implements ScanTableSource, SupportsFilterPushDown,
-    SupportsProjectionPushDown, SupportsLimitPushDown, SupportsWatermarkPushDown {
+    SupportsProjectionPushDown, SupportsLimitPushDown, SupportsWatermarkPushDown, LookupTableSource {
 
   public static final Logger LOG = LoggerFactory.getLogger(ArcticDynamicSource.class);
 
@@ -53,6 +66,10 @@ public class ArcticDynamicSource implements ScanTableSource, SupportsFilterPushD
   private final ArcticTable arcticTable;
   private final Map<String, String> properties;
 
+  private int[] projectFields;
+  private List<Expression> filters;
+  private ArcticTableLoader tableLoader;
+
   @Nullable
   protected WatermarkStrategy<RowData> watermarkStrategy;
 
@@ -61,15 +78,18 @@ public class ArcticDynamicSource implements ScanTableSource, SupportsFilterPushD
    * @param arcticDynamicSource underlying source
    * @param arcticTable         arcticTable
    * @param properties          With all ArcticTable properties and sql options
+   * @param tableLoader
    */
   public ArcticDynamicSource(String tableName,
                              ScanTableSource arcticDynamicSource,
                              ArcticTable arcticTable,
-                             Map<String, String> properties) {
+                             Map<String, String> properties,
+                             ArcticTableLoader tableLoader) {
     this.tableName = tableName;
     this.arcticDynamicSource = arcticDynamicSource;
     this.arcticTable = arcticTable;
     this.properties = properties;
+    this.tableLoader = tableLoader;
   }
 
   @Override
@@ -88,7 +108,7 @@ public class ArcticDynamicSource implements ScanTableSource, SupportsFilterPushD
 
   @Override
   public DynamicTableSource copy() {
-    return new ArcticDynamicSource(tableName, arcticDynamicSource, arcticTable, properties);
+    return new ArcticDynamicSource(tableName, arcticDynamicSource, arcticTable, properties, tableLoader);
   }
 
   @Override
@@ -98,6 +118,9 @@ public class ArcticDynamicSource implements ScanTableSource, SupportsFilterPushD
 
   @Override
   public Result applyFilters(List<ResolvedExpression> filters) {
+    IcebergAndFlinkFilters icebergAndFlinkFilters = FilterUtil.convertFlinkExpressToIceberg(filters);
+    this.filters = icebergAndFlinkFilters.expressions();
+
     if (arcticDynamicSource instanceof SupportsFilterPushDown) {
       return ((SupportsFilterPushDown) arcticDynamicSource).applyFilters(filters);
     } else {
@@ -116,10 +139,12 @@ public class ArcticDynamicSource implements ScanTableSource, SupportsFilterPushD
 
   @Override
   public void applyProjection(int[][] projectedFields) {
+    projectFields = new int[projectedFields.length];
     for (int i = 0; i < projectedFields.length; i++) {
-      org.apache.flink.util.Preconditions.checkArgument(
+      Preconditions.checkArgument(
           projectedFields[i].length == 1,
           "Don't support nested projection now.");
+      projectFields[i] = projectedFields[i][0];
     }
 
     if (arcticDynamicSource instanceof SupportsProjectionPushDown) {
@@ -139,5 +164,57 @@ public class ArcticDynamicSource implements ScanTableSource, SupportsFilterPushD
     if (arcticDynamicSource instanceof SupportsWatermarkPushDown) {
       ((SupportsWatermarkPushDown) arcticDynamicSource).applyWatermark(watermarkStrategy);
     }
+  }
+
+  @Override
+  public LookupRuntimeProvider getLookupRuntimeProvider(LookupContext context) {
+    int[] joinKeys = new int[context.getKeys().length];
+    for (int i = 0; i < context.getKeys().length; i++) {
+      Preconditions.checkArgument(
+          context.getKeys()[i].length == 1,
+          "Arctic lookup join doesn't support the row field as a joining key.");
+      joinKeys[i] = context.getKeys()[i][0];
+    }
+
+    return TableFunctionProvider.of(getLookupFunction(joinKeys));
+  }
+
+  private ArcticLookupFunction getLookupFunction(int[] joinKeys) {
+    Schema arcticTableSchema = arcticTable.schema();
+
+    Schema projectedSchema;
+    if (projectFields == null) {
+      projectedSchema = arcticTable.schema();
+    } else {
+      List<String> projectedFieldNames =
+          Arrays
+              .stream(projectFields)
+              .mapToObj(
+                  index ->
+                      arcticTable.schema().columns().get(index).name())
+              .collect(Collectors.toList());
+      projectedSchema = SchemaUtil.convertFieldsToSchema(arcticTableSchema, projectedFieldNames);
+    }
+
+    List<String> joinKeyNames =
+        Arrays
+            .stream(joinKeys)
+            .mapToObj(
+                index -> arcticTableSchema.columns().get(index).name())
+            .collect(Collectors.toList());
+
+    Configuration config = new Configuration();
+    properties.forEach(config::setString);
+
+    long cacheMaxRows = config.getLong(LOOKUP_CACHE_MAX_ROWS);
+
+    return
+        new ArcticLookupFunction(
+            arcticTable,
+            joinKeyNames,
+            projectedSchema,
+            cacheMaxRows,
+            filters,
+            tableLoader);
   }
 }

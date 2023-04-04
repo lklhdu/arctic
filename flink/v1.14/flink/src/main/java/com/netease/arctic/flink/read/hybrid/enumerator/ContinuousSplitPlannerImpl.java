@@ -28,6 +28,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.flink.annotation.Internal;
 import org.apache.iceberg.FileContent;
 import org.apache.iceberg.Snapshot;
+import org.apache.iceberg.expressions.Expression;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -72,6 +73,19 @@ public class ContinuousSplitPlannerImpl implements ContinuousSplitPlanner {
     }
   }
 
+  @Override
+  public ContinuousEnumerationResult planSplits(ArcticEnumeratorOffset lastOffset, List<Expression> filters) {
+    if (table == null) {
+      table = loadArcticTable(loader).asKeyedTable();
+    }
+    table.refresh();
+    if (lastOffset != null) {
+      return discoverIncrementalSplits(lastOffset, filters);
+    } else {
+      return discoverInitialSplits(filters);
+    }
+  }
+
   private ContinuousEnumerationResult discoverIncrementalSplits(ArcticEnumeratorOffset lastPosition) {
     long fromChangeSnapshotId = lastPosition.changeSnapshotId();
     Snapshot changeSnapshot = table.changeTable().currentSnapshot();
@@ -98,9 +112,56 @@ public class ContinuousSplitPlannerImpl implements ContinuousSplitPlanner {
     return ContinuousEnumerationResult.EMPTY;
   }
 
+  private ContinuousEnumerationResult discoverIncrementalSplits(
+      ArcticEnumeratorOffset lastPosition, List<Expression> filters) {
+    long fromChangeSnapshotId = lastPosition.changeSnapshotId();
+    Snapshot changeSnapshot = table.changeTable().currentSnapshot();
+    if (changeSnapshot != null && changeSnapshot.snapshotId() != fromChangeSnapshotId) {
+      long snapshotId = changeSnapshot.snapshotId();
+      TableEntriesScan.Builder tableEntriesScanBuilder =
+          TableEntriesScan.builder(table.changeTable())
+              .useSnapshot(snapshotId)
+              .includeFileContent(FileContent.DATA);
+      if (filters != null) {
+        filters.forEach(tableEntriesScanBuilder::withDataFilter);
+      }
+      TableEntriesScan entriesScan = tableEntriesScanBuilder.build();
+
+      Long fromSequence = null;
+      if (fromChangeSnapshotId != Long.MIN_VALUE) {
+        Snapshot snapshot = table.changeTable().snapshot(fromChangeSnapshotId);
+        fromSequence = snapshot.sequenceNumber();
+      }
+
+      List<ArcticSplit> arcticChangeSplit =
+          planChangeTable(entriesScan, fromSequence, table.changeTable().spec(), splitCount);
+      return new ContinuousEnumerationResult(
+          arcticChangeSplit,
+          lastPosition,
+          ArcticEnumeratorOffset.of(snapshotId, null));
+    }
+    return ContinuousEnumerationResult.EMPTY;
+  }
+
   private ContinuousEnumerationResult discoverInitialSplits() {
     Snapshot changeSnapshot = table.changeTable().currentSnapshot();
     List<ArcticSplit> arcticSplits = FlinkSplitPlanner.planFullTable(table, splitCount);
+
+    long changeStartSnapshotId = changeSnapshot != null ? changeSnapshot.snapshotId() : EARLIEST_SNAPSHOT_ID;
+    if (changeSnapshot == null && CollectionUtils.isEmpty(arcticSplits)) {
+      LOG.info("There have no change snapshot, and no base splits in table: {}.", table);
+      return ContinuousEnumerationResult.EMPTY;
+    }
+
+    return new ContinuousEnumerationResult(
+        arcticSplits,
+        null,
+        ArcticEnumeratorOffset.of(changeStartSnapshotId, null));
+  }
+
+  private ContinuousEnumerationResult discoverInitialSplits(List<Expression> filters) {
+    Snapshot changeSnapshot = table.changeTable().currentSnapshot();
+    List<ArcticSplit> arcticSplits = FlinkSplitPlanner.planFullTable(table, filters, splitCount);
 
     long changeStartSnapshotId = changeSnapshot != null ? changeSnapshot.snapshotId() : EARLIEST_SNAPSHOT_ID;
     if (changeSnapshot == null && CollectionUtils.isEmpty(arcticSplits)) {

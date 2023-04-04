@@ -20,12 +20,14 @@ package com.netease.arctic.utils;
 
 import com.netease.arctic.table.MetadataColumns;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.types.TypeUtil;
 import org.apache.iceberg.types.Types;
 
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class SchemaUtil {
 
@@ -60,5 +62,15 @@ public class SchemaUtil {
     });
 
     return new Schema(schemaId, fields, identifierFields);
+  }
+
+  public static Schema convertFieldsToSchema(Schema baseSchema, List<String> fieldNames) {
+    Preconditions.checkNotNull(fieldNames);
+    Preconditions.checkNotNull(baseSchema);
+
+    int schemaId = baseSchema.schemaId();
+    List<Types.NestedField> fields = fieldNames.stream().map(baseSchema::findField).collect(Collectors.toList());
+
+    return new Schema(schemaId, fields);
   }
 }

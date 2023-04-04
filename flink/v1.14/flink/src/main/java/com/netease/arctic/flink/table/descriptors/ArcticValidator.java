@@ -217,6 +217,13 @@ public class ArcticValidator extends ConnectorDescriptorValidator {
       .withDescription("Mark the time to start double writing (the logstore of arctic table catches up with the" +
           " historical data).");
 
+  public static final ConfigOption<Long> LOOKUP_CACHE_MAX_ROWS = ConfigOptions
+      .key("lookup.cache.max-rows")
+      .longType()
+      .defaultValue(10000L)
+      .withDescription("The maximum number of rows in the lookup cache, beyond which the oldest row will expire." +
+          " By default, lookup cache is 10000.");
+
   @Override
   public void validate(DescriptorProperties properties) {
     String emitMode = properties.getString(ARCTIC_EMIT_MODE.key());

@@ -169,7 +169,7 @@ public class DynamicTableFactory implements DynamicTableSourceFactory, DynamicTa
     }
 
     return new ArcticDynamicSource(
-        identifier.getObjectName(), arcticDynamicSource, arcticTable, arcticTable.properties());
+        identifier.getObjectName(), arcticDynamicSource, arcticTable, arcticTable.properties(), tableLoader);
   }
 
   @Override
@@ -291,7 +291,7 @@ public class DynamicTableFactory implements DynamicTableSourceFactory, DynamicTa
     if (logStoreAddress != null) {
       properties.putIfAbsent(BOOTSTRAP_SERVERS_CONFIG, logStoreAddress);
     }
-    
+
     LOG.info("create log source with deprecated API");
     return new KafkaDynamicSource(
         physicalDataType,

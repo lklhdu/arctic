@@ -26,10 +26,12 @@ import com.netease.arctic.flink.read.hybrid.split.SnapshotSplit;
 import com.netease.arctic.scan.ArcticFileScanTask;
 import com.netease.arctic.scan.BasicArcticFileScanTask;
 import com.netease.arctic.scan.CombinedScanTask;
+import com.netease.arctic.scan.KeyedTableScan;
 import com.netease.arctic.scan.TableEntriesScan;
 import com.netease.arctic.table.KeyedTable;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.CloseableIterator;
 
@@ -56,6 +58,17 @@ public class FlinkSplitPlanner {
 
   public static List<ArcticSplit> planFullTable(KeyedTable keyedTable, AtomicInteger splitCount) {
     CloseableIterable<CombinedScanTask> combinedScanTasks = keyedTable.newScan().planTasks();
+    BaseAndChangeTask baseAndChangeTask = BaseAndChangeTask.of(combinedScanTasks);
+    return planFullTable(baseAndChangeTask, splitCount);
+  }
+
+  public static List<ArcticSplit> planFullTable(
+      KeyedTable keyedTable, List<Expression> filters, AtomicInteger splitCount) {
+    KeyedTableScan keyedTableScan = keyedTable.newScan();
+    if (filters != null) {
+      filters.forEach(keyedTableScan::filter);
+    }
+    CloseableIterable<CombinedScanTask> combinedScanTasks = keyedTableScan.planTasks();
     BaseAndChangeTask baseAndChangeTask = BaseAndChangeTask.of(combinedScanTasks);
     return planFullTable(baseAndChangeTask, splitCount);
   }

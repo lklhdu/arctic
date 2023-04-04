@@ -20,8 +20,10 @@
 package com.netease.arctic.flink.read.hybrid.enumerator;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.iceberg.expressions.Expression;
 
 import java.io.Closeable;
+import java.util.List;
 
 /**
  * This interface is introduced so that we can plug in different split planner for unit test
@@ -33,4 +35,10 @@ public interface ContinuousSplitPlanner extends Closeable {
    * Discover the files appended between {@code lastPosition} and current table snapshot
    */
   ContinuousEnumerationResult planSplits(ArcticEnumeratorOffset lastPosition);
+
+  /**
+   * Discover the files appended between {@code lastPosition} and current table snapshot,
+   * filter the data with expressions.
+   */
+  ContinuousEnumerationResult planSplits(ArcticEnumeratorOffset lastPosition, List<Expression> filters);
 }
