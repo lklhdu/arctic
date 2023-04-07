@@ -19,12 +19,10 @@
 package com.netease.arctic.flink.lookup;
 
 import com.netease.arctic.flink.read.MixedIncrementalLoader;
-import com.netease.arctic.flink.read.hybrid.enumerator.ContinuousSplitPlannerImpl;
-import com.netease.arctic.flink.read.hybrid.reader.RowDataReaderFunction;
-import com.netease.arctic.flink.read.source.DataIterator;
+import com.netease.arctic.flink.read.hybrid.enumerator.MergeOnReadIncrementalPlanner;
+import com.netease.arctic.flink.read.source.FlinkArcticMORDataReader;
 import com.netease.arctic.flink.table.ArcticTableLoader;
 import com.netease.arctic.table.ArcticTable;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -33,6 +31,8 @@ import org.apache.flink.table.functions.TableFunction;
 import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.expressions.Expression;
+import org.apache.iceberg.flink.data.RowDataUtil;
+import org.apache.iceberg.io.CloseableIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,7 +55,7 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
   private final List<Expression> filters;
   private final ArcticTableLoader loader;
   private boolean loading = false;
-  private long nextLoadTime = Long.MAX_VALUE;
+  private long nextLoadTime = Long.MIN_VALUE;
   private MixedIncrementalLoader<RowData> incrementalLoader;
 
   public ArcticLookupFunction(
@@ -88,15 +88,17 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
         projectSchema);
     this.incrementalLoader =
         new MixedIncrementalLoader<>(
-            new ContinuousSplitPlannerImpl(loader),
-            new RowDataReaderFunction(
-                new Configuration(),
+            new MergeOnReadIncrementalPlanner(loader),
+            new FlinkArcticMORDataReader(
+                arcticTable.io(),
                 arcticTable.schema(),
                 projectSchema,
                 arcticTable.asKeyedTable().primaryKeySpec(),
                 null,
                 true,
-                arcticTable.io()),
+                RowDataUtil::convertConstant,
+                true
+            ),
             filters
         );
     checkAndLoad();
@@ -113,8 +115,8 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
     }
   }
 
-  private void checkAndLoad() throws IOException {
-    if (nextLoadTime < System.currentTimeMillis()) {
+  private synchronized void checkAndLoad() throws IOException {
+    if (nextLoadTime > System.currentTimeMillis()) {
       return;
     }
     if (loading) {
@@ -122,11 +124,13 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
       return;
     }
     // todo hard cod
-    nextLoadTime = nextLoadTime + 1000 * 10;
+    nextLoadTime = System.currentTimeMillis() + 1000 * 10;
+
     loading = true;
     while (incrementalLoader.hasNext()) {
-      DataIterator<RowData> iterator = incrementalLoader.next();
-      kvTable.upsert(iterator);
+      try (CloseableIterator<RowData> iterator = incrementalLoader.next()) {
+        kvTable.upsert(iterator);
+      }
     }
     loading = false;
   }

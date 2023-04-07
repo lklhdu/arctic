@@ -48,9 +48,9 @@ import static com.netease.arctic.flink.util.ArcticUtils.loadArcticTable;
 public class ContinuousSplitPlannerImpl implements ContinuousSplitPlanner {
   private static final Logger LOG = LoggerFactory.getLogger(ContinuousSplitPlannerImpl.class);
 
-  private transient KeyedTable table;
-  private final ArcticTableLoader loader;
-  private static final AtomicInteger splitCount = new AtomicInteger();
+  protected transient KeyedTable table;
+  protected final ArcticTableLoader loader;
+  protected static final AtomicInteger splitCount = new AtomicInteger();
 
   public ContinuousSplitPlannerImpl(ArcticTableLoader loader) {
     this.loader = loader;
@@ -112,7 +112,7 @@ public class ContinuousSplitPlannerImpl implements ContinuousSplitPlanner {
     return ContinuousEnumerationResult.EMPTY;
   }
 
-  private ContinuousEnumerationResult discoverIncrementalSplits(
+  protected ContinuousEnumerationResult discoverIncrementalSplits(
       ArcticEnumeratorOffset lastPosition, List<Expression> filters) {
     long fromChangeSnapshotId = lastPosition.changeSnapshotId();
     Snapshot changeSnapshot = table.changeTable().currentSnapshot();
@@ -159,7 +159,7 @@ public class ContinuousSplitPlannerImpl implements ContinuousSplitPlanner {
         ArcticEnumeratorOffset.of(changeStartSnapshotId, null));
   }
 
-  private ContinuousEnumerationResult discoverInitialSplits(List<Expression> filters) {
+  protected ContinuousEnumerationResult discoverInitialSplits(List<Expression> filters) {
     Snapshot changeSnapshot = table.changeTable().currentSnapshot();
     List<ArcticSplit> arcticSplits = FlinkSplitPlanner.planFullTable(table, filters, splitCount);
 

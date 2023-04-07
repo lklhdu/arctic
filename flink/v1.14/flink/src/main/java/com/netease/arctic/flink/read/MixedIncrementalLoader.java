@@ -23,8 +23,9 @@ import com.netease.arctic.flink.read.hybrid.enumerator.ContinuousEnumerationResu
 import com.netease.arctic.flink.read.hybrid.enumerator.ContinuousSplitPlanner;
 import com.netease.arctic.flink.read.hybrid.reader.DataIteratorReaderFunction;
 import com.netease.arctic.flink.read.hybrid.split.ArcticSplit;
-import com.netease.arctic.flink.read.source.DataIterator;
+import com.netease.arctic.hive.io.reader.AbstractAdaptHiveArcticDataReader;
 import org.apache.iceberg.expressions.Expression;
+import org.apache.iceberg.io.CloseableIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,10 +40,22 @@ import java.util.concurrent.atomic.AtomicReference;
 public class MixedIncrementalLoader<T> implements AutoCloseable {
   private static final Logger LOG = LoggerFactory.getLogger(MixedIncrementalLoader.class);
   private final ContinuousSplitPlanner continuousSplitPlanner;
-  private final DataIteratorReaderFunction<T> readerFunction;
+  private DataIteratorReaderFunction<T> readerFunction;
+  private AbstractAdaptHiveArcticDataReader<T> flinkArcticMORDataReader;
   private final List<Expression> filters;
   private final AtomicReference<ArcticEnumeratorOffset> enumeratorPosition;
   private final Queue<ArcticSplit> splitQueue;
+
+  public MixedIncrementalLoader(
+      ContinuousSplitPlanner continuousSplitPlanner,
+      AbstractAdaptHiveArcticDataReader<T> flinkArcticMORDataReader,
+      List<Expression> filters) {
+    this.continuousSplitPlanner = continuousSplitPlanner;
+    this.flinkArcticMORDataReader = flinkArcticMORDataReader;
+    this.filters = filters;
+    this.enumeratorPosition = new AtomicReference<>();
+    this.splitQueue = new ArrayDeque<>();
+  }
 
   public MixedIncrementalLoader(
       ContinuousSplitPlanner continuousSplitPlanner,
@@ -72,14 +85,14 @@ public class MixedIncrementalLoader<T> implements AutoCloseable {
     return true;
   }
 
-  public DataIterator<T> next() {
+  public CloseableIterator<T> next() {
     ArcticSplit split = splitQueue.poll();
     if (split == null) {
       throw new IllegalArgumentException("next() called, but no more valid splits");
     }
 
     LOG.info("Fetching data by this split:{}.", split);
-    return readerFunction.createDataIterator(split);
+    return flinkArcticMORDataReader.readData(split.asMergeOnReadSplit().keyedTableScanTask());
   }
 
   @Override

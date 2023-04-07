@@ -72,6 +72,10 @@ public abstract class ArcticSplit implements SourceSplit, Serializable, Comparab
     return (ChangelogSplit) this;
   }
 
+  public final MergeOnReadSplit asMergeOnReadSplit() {
+    return (MergeOnReadSplit) this;
+  }
+
   /**
    * update split current file offset and record offset
    * if this split is {@link SnapshotSplit} recordOffsets means [insertFileOffset, insertRecordOffset]
@@ -104,4 +108,5 @@ public abstract class ArcticSplit implements SourceSplit, Serializable, Comparab
   }
 
   public abstract ArcticSplit copy();
+
 }

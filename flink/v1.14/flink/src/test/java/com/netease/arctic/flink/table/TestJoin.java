@@ -274,6 +274,7 @@ public class TestJoin extends FlinkTestBase {
       add(GenericRowData.ofKind(
           RowKind.INSERT, 463, 4L, StringData.fromString("d")));
     }};
+
     for (RowData record : baseData) {
       taskWriter.write(record);
     }
@@ -285,7 +286,7 @@ public class TestJoin extends FlinkTestBase {
 
     TableResult result = exec("select u.name, u.id, dim.info, dim.name dname from `user` as u left join  " + table +
         "/*+OPTIONS('streaming'='true')*/ for system_time as of u.ptm as dim" +
-        " on u.id = dim.id");
+        " on u.id = dim.id  ");
 
     CommonTestUtils.waitForJobStatus(result.getJobClient().get(), Lists.newArrayList(JobStatus.RUNNING),
         Deadline.fromNow(Duration.ofSeconds(30)));

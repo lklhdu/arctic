@@ -24,6 +24,8 @@ import com.netease.arctic.log.LogDataJsonSerialization;
 import com.netease.arctic.utils.SchemaUtil;
 import org.apache.flink.table.data.RowData;
 import org.apache.iceberg.Schema;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -31,8 +33,10 @@ import java.io.Serializable;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Set;
 
 public interface KVTable extends Serializable, Closeable {
+  Logger LOG = LoggerFactory.getLogger(KVTable.class);
 
   List<RowData> get(RowData key) throws IOException;
 
@@ -64,9 +68,20 @@ public interface KVTable extends Serializable, Closeable {
       List<String> joinKeys,
       long lruCacheSize,
       Schema projectSchema) {
+    Set<String> joinKeySet = new HashSet<>(joinKeys);
+    Set<String> primaryKeySet = new HashSet<>(primaryKeys);
+    if (joinKeySet.size() > primaryKeySet.size() && joinKeySet.containsAll(primaryKeySet)) {
+      LOG.info("create unique index table, join keys contain all primary keys, unique keys are {}, join keys are {}.",
+          primaryKeys.toArray(), joinKeys.toArray());
+      return new UniqueIndexTable(stateFactory, joinKeys, lruCacheSize, projectSchema);
+    }
     if (new HashSet<>(primaryKeys).equals(new HashSet<>(joinKeys))) {
+      LOG.info("create unique index table, unique keys are {}, join keys are {}.",
+          primaryKeys.toArray(), joinKeys.toArray());
       return new UniqueIndexTable(stateFactory, primaryKeys, lruCacheSize, projectSchema);
     } else {
+      LOG.info("create secondary index table, unique keys are {}, join keys are {}.",
+          primaryKeys.toArray(), joinKeys.toArray());
       return new SecondaryIndexTable(stateFactory, primaryKeys, joinKeys, lruCacheSize, projectSchema);
     }
   }
