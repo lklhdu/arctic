@@ -49,6 +49,7 @@ public class MixedIncrementalLoader<T> implements AutoCloseable {
   public MixedIncrementalLoader(
       ContinuousSplitPlanner continuousSplitPlanner,
       AbstractAdaptHiveArcticDataReader<T> flinkArcticMORDataReader,
+      DataIteratorReaderFunction<T> readerFunction,
       List<Expression> filters) {
     this.continuousSplitPlanner = continuousSplitPlanner;
     this.flinkArcticMORDataReader = flinkArcticMORDataReader;
@@ -92,7 +93,10 @@ public class MixedIncrementalLoader<T> implements AutoCloseable {
     }
 
     LOG.info("Fetching data by this split:{}.", split);
-    return flinkArcticMORDataReader.readData(split.asMergeOnReadSplit().keyedTableScanTask());
+    if (split.isMergeOnReadSplit()) {
+      return flinkArcticMORDataReader.readData(split.asMergeOnReadSplit().keyedTableScanTask());
+    }
+    return readerFunction.createDataIterator(split);
   }
 
   @Override

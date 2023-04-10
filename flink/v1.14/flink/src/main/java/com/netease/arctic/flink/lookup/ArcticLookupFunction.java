@@ -20,9 +20,11 @@ package com.netease.arctic.flink.lookup;
 
 import com.netease.arctic.flink.read.MixedIncrementalLoader;
 import com.netease.arctic.flink.read.hybrid.enumerator.MergeOnReadIncrementalPlanner;
+import com.netease.arctic.flink.read.hybrid.reader.RowDataReaderFunction;
 import com.netease.arctic.flink.read.source.FlinkArcticMORDataReader;
 import com.netease.arctic.flink.table.ArcticTableLoader;
 import com.netease.arctic.table.ArcticTable;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.operators.StreamingRuntimeContext;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
@@ -97,6 +99,16 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
                 null,
                 true,
                 RowDataUtil::convertConstant,
+                true
+            ),
+            new RowDataReaderFunction(
+                new Configuration(),
+                projectSchema,
+                arcticTable.schema(),
+                arcticTable.asKeyedTable().primaryKeySpec(),
+                null,
+                true,
+                arcticTable.io(),
                 true
             ),
             filters

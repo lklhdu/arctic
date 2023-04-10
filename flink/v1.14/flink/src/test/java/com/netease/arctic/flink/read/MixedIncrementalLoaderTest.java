@@ -132,10 +132,20 @@ public class MixedIncrementalLoaderTest extends TableTestBase implements FlinkTa
         true
     );
 
+
     MixedIncrementalLoader<RowData> incrementalLoader =
         new MixedIncrementalLoader<>(
             morPlanner,
             flinkArcticMORDataReader,
+            new RowDataReaderFunction(
+                new Configuration(),
+                keyedTable.schema(),
+                keyedTable.schema(),
+                keyedTable.asKeyedTable().primaryKeySpec(),
+                null,
+                true,
+                keyedTable.io(),
+                true),
             expressions
         );
 

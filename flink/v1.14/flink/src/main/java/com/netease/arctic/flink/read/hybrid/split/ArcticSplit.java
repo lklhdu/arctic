@@ -58,6 +58,10 @@ public abstract class ArcticSplit implements SourceSplit, Serializable, Comparab
     return getClass() == ChangelogSplit.class;
   }
 
+  public final boolean isMergeOnReadSplit() {
+    return getClass() == MergeOnReadSplit.class;
+  }
+
   /**
    * Casts this split into a {@link SnapshotSplit}.
    */
