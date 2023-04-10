@@ -23,8 +23,8 @@ import com.netease.arctic.flink.shuffle.LogRecordV1;
 import com.netease.arctic.log.LogDataJsonDeserialization;
 import com.netease.arctic.log.LogDataJsonSerialization;
 import com.netease.arctic.utils.map.RocksDBBackend;
-import org.apache.commons.compress.utils.Lists;
 import org.apache.flink.table.data.RowData;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 
 import java.io.IOException;
 import java.util.Arrays;

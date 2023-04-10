@@ -30,12 +30,12 @@ import com.netease.arctic.scan.CombinedScanTask;
 import com.netease.arctic.scan.KeyedTableScan;
 import com.netease.arctic.scan.TableEntriesScan;
 import com.netease.arctic.table.KeyedTable;
-import org.apache.commons.compress.utils.Lists;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.CloseableIterator;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
