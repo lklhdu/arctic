@@ -47,8 +47,9 @@ public class UniqueIndexTable implements KVTable {
             "uniqueIndex",
             lruCacheSize,
             createKeySerialization(projectSchema, primaryKeys),
-            createValueSerialization(projectSchema),
-            createValueDeserialization(projectSchema));
+            createValueSerializer(projectSchema),
+            createValueDeserialization(projectSchema),
+            projectSchema);
     List<String> fields = projectSchema.asStruct().fields()
         .stream().map(Types.NestedField::name).collect(Collectors.toList());
     this.uniqueKeyIndexMapping = primaryKeys.stream().mapToInt(fields::indexOf).toArray();

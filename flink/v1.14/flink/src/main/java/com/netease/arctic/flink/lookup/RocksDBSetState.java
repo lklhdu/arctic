@@ -24,6 +24,7 @@ import com.netease.arctic.log.LogDataJsonDeserialization;
 import com.netease.arctic.log.LogDataJsonSerialization;
 import com.netease.arctic.utils.map.RocksDBBackend;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 
 import java.io.IOException;
@@ -46,14 +47,15 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
       long lruMaximumSize,
       LogDataJsonSerialization<RowData> keySerialization,
       LogDataJsonSerialization<RowData> elementSerialization,
-      LogDataJsonSerialization<RowData> valueSerialization,
+      BinaryRowDataSerializer valueSerialization,
       LogDataJsonDeserialization<RowData> valueDeserialization) {
     super(
         rocksDB,
         columnFamilyName,
         lruMaximumSize,
         elementSerialization,
-        valueSerialization, valueDeserialization);
+        valueSerialization,
+        valueDeserialization);
     this.keySerialization = keySerialization;
   }
 

@@ -26,6 +26,7 @@ import com.netease.arctic.utils.map.RocksDBBackend;
 import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 
 public abstract class RocksDBState<V> {
   protected RocksDBBackend rocksDB;
@@ -35,7 +36,7 @@ public abstract class RocksDBState<V> {
   protected final String columnFamilyName;
   protected LogDataJsonSerialization<RowData> keySerialization;
 
-  protected LogDataJsonSerialization<RowData> valueSerialization;
+  protected BinaryRowDataSerializer valueSerializer;
   protected LogDataJsonDeserialization<RowData> valueDeserialization;
 
   public RocksDBState(
@@ -43,13 +44,13 @@ public abstract class RocksDBState<V> {
       String columnFamilyName,
       long lruMaximumSize,
       LogDataJsonSerialization<RowData> keySerialization,
-      LogDataJsonSerialization<RowData> valueSerialization,
+      BinaryRowDataSerializer valueSerializer,
       LogDataJsonDeserialization<RowData> valueDeserialization) {
     this.rocksDB = rocksDB;
     this.guavaCache = CacheBuilder.newBuilder().maximumSize(lruMaximumSize).build();
     this.columnFamilyName = columnFamilyName;
     this.keySerialization = keySerialization;
-    this.valueSerialization = valueSerialization;
+    this.valueSerializer = valueSerializer;
     this.valueDeserialization = valueDeserialization;
   }
 

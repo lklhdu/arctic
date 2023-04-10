@@ -22,6 +22,8 @@ import com.netease.arctic.log.LogDataJsonDeserialization;
 import com.netease.arctic.log.LogDataJsonSerialization;
 import com.netease.arctic.utils.map.RocksDBBackend;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
+import org.apache.iceberg.Schema;
 
 public class StateFactory {
 
@@ -36,8 +38,9 @@ public class StateFactory {
       String columnFamilyName,
       long lruMaximumSize,
       LogDataJsonSerialization<RowData> keySerialization,
-      LogDataJsonSerialization<RowData> valueSerialization,
-      LogDataJsonDeserialization<RowData> valueDeserialization) {
+      BinaryRowDataSerializer valueSerializer,
+      LogDataJsonDeserialization<RowData> valueDeserialization,
+      Schema projectSchema) {
     db.addColumnFamily(columnFamilyName);
     return
         new RocksDBRecordState(
@@ -45,8 +48,9 @@ public class StateFactory {
             columnFamilyName,
             lruMaximumSize,
             keySerialization,
-            valueSerialization,
-            valueDeserialization);
+            valueSerializer,
+            valueDeserialization,
+            projectSchema);
   }
 
   public RocksDBSetState createSetState(
@@ -54,7 +58,7 @@ public class StateFactory {
       long lruMaximumSize,
       LogDataJsonSerialization<RowData> keySerialization,
       LogDataJsonSerialization<RowData> elementSerialization,
-      LogDataJsonSerialization<RowData> valueSerialization,
+      BinaryRowDataSerializer valueSerializer,
       LogDataJsonDeserialization<RowData> valueDeserialization
   ) {
     db.addColumnFamily(columnFamilyName);
@@ -64,7 +68,7 @@ public class StateFactory {
         lruMaximumSize,
         keySerialization,
         elementSerialization,
-        valueSerialization,
+        valueSerializer,
         valueDeserialization);
   }
 }

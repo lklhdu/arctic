@@ -19,12 +19,20 @@
 package com.netease.arctic.flink.lookup;
 
 
+import org.apache.flink.core.memory.DataInputDeserializer;
+import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
 import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
+import org.apache.flink.table.data.binary.BinaryRowData;
+import org.apache.flink.table.data.writer.BinaryRowWriter;
+import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
+import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.types.RowKind;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.flink.FlinkSchemaUtil;
 import org.apache.iceberg.types.Types;
 import org.junit.Assert;
 import org.junit.Before;
@@ -34,6 +42,7 @@ import org.junit.rules.TemporaryFolder;
 import org.junit.rules.TestName;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
@@ -54,6 +63,37 @@ public class KVTableTest {
   @Before
   public void before() throws IOException {
     dbPath = temp.newFolder().getPath();
+  }
+
+  @Test
+  public void testRowDataSerializer() throws IOException {
+    BinaryRowDataSerializer binaryRowDataSerializer = new BinaryRowDataSerializer(3);
+
+    GenericRowData genericRowData = (GenericRowData) row(1, "2", 3);
+//    BinaryRowData record = toBinaryRowData(genericRowData);
+    RowType rowType = FlinkSchemaUtil.convert(arcticSchema);
+    RowDataSerializer rowDataSerializer = new RowDataSerializer(rowType);
+    BinaryRowData record = rowDataSerializer.toBinaryRow(genericRowData);
+
+    DataOutputSerializer view = new DataOutputSerializer(32);
+    binaryRowDataSerializer.serialize(record, view);
+    System.out.println(Arrays.toString(view.getCopyOfBuffer()));
+
+    BinaryRowData desRowData = binaryRowDataSerializer.deserialize(new DataInputDeserializer(view.getCopyOfBuffer()));
+    Assert.assertNotNull(desRowData);
+    Assert.assertEquals(record.getInt(0), desRowData.getInt(0));
+    Assert.assertEquals(record.getInt(1), desRowData.getInt(1));
+    Assert.assertEquals(record.getInt(2), desRowData.getInt(2));
+  }
+
+  private BinaryRowData toBinaryRowData(GenericRowData genericRowData) {
+    BinaryRowData record = new BinaryRowData(3);
+    BinaryRowWriter outputWriter = new BinaryRowWriter(record);
+    for (int i = 0; i < 3; i++) {
+      outputWriter.writeInt(i, i * 100);
+    }
+    outputWriter.complete();
+    return record;
   }
 
   @Test
@@ -132,7 +172,20 @@ public class KVTableTest {
       if (expected == null) {
         Assert.assertEquals(0, values.size());
       } else {
-        Assert.assertEquals(expected, values.get(0));
+        if (values.get(0) instanceof BinaryRowData) {
+          BinaryRowData binaryRowData = (BinaryRowData) values.get(0);
+          for (int j = 0; j < binaryRowData.getArity(); j++) {
+            switch (j) {
+              case 0:
+              case 2:
+                Assert.assertEquals(expected.getInt(j), binaryRowData.getInt(j));
+                break;
+              case 1:
+                Assert.assertEquals(expected.getString(j), binaryRowData.getString(j));
+                break;
+            }
+          }
+        }
       }
     }
   }

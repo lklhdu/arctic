@@ -49,7 +49,7 @@ public class SecondaryIndexTable extends UniqueIndexTable {
             lruCacheSize,
             createKeySerialization(projectSchema, joinKeys),
             createKeySerialization(projectSchema, primaryKeys),
-            createValueSerialization(projectSchema),
+            createValueSerializer(projectSchema),
             createValueDeserialization(projectSchema)
         );
 

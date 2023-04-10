@@ -23,6 +23,7 @@ import com.netease.arctic.log.LogDataJsonDeserialization;
 import com.netease.arctic.log.LogDataJsonSerialization;
 import com.netease.arctic.utils.SchemaUtil;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.iceberg.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +52,10 @@ public interface KVTable extends Serializable, Closeable {
 
   default LogDataJsonSerialization<RowData> createValueSerialization(Schema projectSchema) {
     return new LogDataJsonSerialization<>(projectSchema, LogRecordV1.fieldGetterFactory);
+  }
+
+  default BinaryRowDataSerializer createValueSerializer(Schema projectSchema) {
+    return new BinaryRowDataSerializer(projectSchema.asStruct().fields().size());
   }
 
   default LogDataJsonDeserialization<RowData> createValueDeserialization(Schema projectSchema) {
