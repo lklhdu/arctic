@@ -53,6 +53,7 @@ public class MixedIncrementalLoader<T> implements AutoCloseable {
       List<Expression> filters) {
     this.continuousSplitPlanner = continuousSplitPlanner;
     this.flinkArcticMORDataReader = flinkArcticMORDataReader;
+    this.readerFunction = readerFunction;
     this.filters = filters;
     this.enumeratorPosition = new AtomicReference<>();
     this.splitQueue = new ArrayDeque<>();
