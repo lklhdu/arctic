@@ -457,7 +457,9 @@ public class RocksDBBackend {
 
     @Override
     public void close() throws Exception {
-      iterator.close();
+      if (iterator != null) {
+        iterator.close();
+      }
     }
   }
 }

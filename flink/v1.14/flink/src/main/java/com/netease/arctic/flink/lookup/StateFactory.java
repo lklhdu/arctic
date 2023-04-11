@@ -18,12 +18,7 @@
 
 package com.netease.arctic.flink.lookup;
 
-import com.netease.arctic.log.LogDataJsonDeserialization;
-import com.netease.arctic.log.LogDataJsonSerialization;
 import com.netease.arctic.utils.map.RocksDBBackend;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
-import org.apache.iceberg.Schema;
 
 public class StateFactory {
 
@@ -37,29 +32,24 @@ public class StateFactory {
   public RocksDBRecordState createRecordState(
       String columnFamilyName,
       long lruMaximumSize,
-      LogDataJsonSerialization<RowData> keySerialization,
-      BinaryRowDataSerializer valueSerializer,
-      LogDataJsonDeserialization<RowData> valueDeserialization,
-      Schema projectSchema) {
+      BinaryRowDataSerializerWrapper keySerializer,
+      BinaryRowDataSerializerWrapper valueSerializer) {
     db.addColumnFamily(columnFamilyName);
     return
         new RocksDBRecordState(
             db,
             columnFamilyName,
             lruMaximumSize,
-            keySerialization,
-            valueSerializer,
-            valueDeserialization,
-            projectSchema);
+            keySerializer,
+            valueSerializer);
   }
 
   public RocksDBSetState createSetState(
       String columnFamilyName,
       long lruMaximumSize,
-      LogDataJsonSerialization<RowData> keySerialization,
-      LogDataJsonSerialization<RowData> elementSerialization,
-      BinaryRowDataSerializer valueSerializer,
-      LogDataJsonDeserialization<RowData> valueDeserialization
+      BinaryRowDataSerializerWrapper keySerialization,
+      BinaryRowDataSerializerWrapper elementSerialization,
+      BinaryRowDataSerializerWrapper valueSerializer
   ) {
     db.addColumnFamily(columnFamilyName);
     return new RocksDBSetState(
@@ -68,7 +58,6 @@ public class StateFactory {
         lruMaximumSize,
         keySerialization,
         elementSerialization,
-        valueSerializer,
-        valueDeserialization);
+        valueSerializer);
   }
 }

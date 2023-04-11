@@ -19,40 +19,22 @@
 package com.netease.arctic.flink.lookup;
 
 import com.ibm.icu.util.ByteArrayWrapper;
-import com.netease.arctic.log.LogDataJsonDeserialization;
-import com.netease.arctic.log.LogDataJsonSerialization;
 import com.netease.arctic.utils.map.RocksDBBackend;
-import org.apache.flink.core.memory.DataInputDeserializer;
-import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
-import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
-import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.Preconditions;
-import org.apache.iceberg.Schema;
-import org.apache.iceberg.flink.FlinkSchemaUtil;
 
 import java.io.IOException;
 import java.util.Optional;
 
 public class RocksDBRecordState extends RocksDBState<byte[]> {
 
-  private Schema projectSchema;
-  private RowDataSerializer rowDataSerializer;
-  private DataOutputSerializer outputView;
-  private DataInputDeserializer inputView;
-
   public RocksDBRecordState(
       RocksDBBackend rocksDB,
       String columnFamilyName,
       long lruMaximumSize,
-      LogDataJsonSerialization<RowData> keySerialization,
-      BinaryRowDataSerializer valueSerializer,
-      LogDataJsonDeserialization<RowData> valueDeserialization,
-      Schema projectSchema) {
-    super(rocksDB, columnFamilyName, lruMaximumSize, keySerialization, valueSerializer, valueDeserialization);
-    this.projectSchema = projectSchema;
+      BinaryRowDataSerializerWrapper keySerializer,
+      BinaryRowDataSerializerWrapper valueSerializer) {
+    super(rocksDB, columnFamilyName, lruMaximumSize, keySerializer, valueSerializer);
   }
 
   /**
@@ -88,7 +70,12 @@ public class RocksDBRecordState extends RocksDBState<byte[]> {
 
     byte[] valueBytes = serializeValue(value);
     rocksDB.put(columnFamilyName, keyBytes, valueBytes);
-    guavaCache.put(wrap(keyBytes), valueBytes);
+
+    // Speed up the initialization process of Lookup Join Function
+    ByteArrayWrapper key = wrap(keyBytes);
+    if (guavaCache.getIfPresent(wrap(keyBytes)) != null) {
+      guavaCache.put(key, valueBytes);
+    }
   }
 
   public void delete(RowData key) throws IOException {
@@ -112,28 +99,10 @@ public class RocksDBRecordState extends RocksDBState<byte[]> {
   }
 
   private byte[] serializeValue(RowData value) throws IOException {
-    if (rowDataSerializer == null) {
-      RowType rowType = FlinkSchemaUtil.convert(projectSchema);
-      rowDataSerializer = new RowDataSerializer(rowType);
-    }
-    BinaryRowData record = rowDataSerializer.toBinaryRow(value);
-    if (outputView == null) {
-      outputView = new DataOutputSerializer(32);
-    }
-    outputView.clear();
-    valueSerializer.serialize(record, outputView);
-
-    return outputView.getCopyOfBuffer();
+    return valueSerializer.serialize(value);
   }
 
   private RowData deserializeValue(byte[] recordBytes) throws IOException {
-    if (recordBytes == null) {
-      return null;
-    }
-    if (inputView == null) {
-      inputView = new DataInputDeserializer();
-    }
-    inputView.setBuffer(recordBytes);
-    return valueSerializer.deserialize(inputView);
+    return valueSerializer.deserialize(recordBytes);
   }
 }

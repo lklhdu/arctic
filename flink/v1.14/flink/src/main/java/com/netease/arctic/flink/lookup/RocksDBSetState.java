@@ -19,12 +19,9 @@
 package com.netease.arctic.flink.lookup;
 
 import com.ibm.icu.util.ByteArrayWrapper;
-import com.netease.arctic.flink.shuffle.LogRecordV1;
-import com.netease.arctic.log.LogDataJsonDeserialization;
-import com.netease.arctic.log.LogDataJsonSerialization;
+import com.netease.arctic.log.Bytes;
 import com.netease.arctic.utils.map.RocksDBBackend;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 
 import java.io.IOException;
@@ -37,7 +34,7 @@ import java.util.List;
  */
 public class RocksDBSetState extends RocksDBState<List<byte[]>> {
 
-  protected LogDataJsonSerialization<RowData> keySerialization;
+  protected BinaryRowDataSerializerWrapper keySerializer;
 
   private static final byte[] EMPTY = new byte[0];
 
@@ -45,18 +42,16 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
       RocksDBBackend rocksDB,
       String columnFamilyName,
       long lruMaximumSize,
-      LogDataJsonSerialization<RowData> keySerialization,
-      LogDataJsonSerialization<RowData> elementSerialization,
-      BinaryRowDataSerializer valueSerialization,
-      LogDataJsonDeserialization<RowData> valueDeserialization) {
+      BinaryRowDataSerializerWrapper keySerialization,
+      BinaryRowDataSerializerWrapper elementSerialization,
+      BinaryRowDataSerializerWrapper valueSerializer) {
     super(
         rocksDB,
         columnFamilyName,
         lruMaximumSize,
         elementSerialization,
-        valueSerialization,
-        valueDeserialization);
-    this.keySerialization = keySerialization;
+        valueSerializer);
+    this.keySerializer = keySerialization;
   }
 
   /**
@@ -72,17 +67,13 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
     ByteArrayWrapper keyWrap = wrap(keyBytes);
     List<byte[]> result = guavaCache.getIfPresent(keyWrap);
     if (result == null) {
-      // todo could be optimized, reduce this array copy.
-      // Key [123, 34, 105, 100, 34, 58, 49, 125] -> {"id":1}, 125 byte is '}' always append the tail.
-      byte[] seek = Arrays.copyOf(keyBytes, keyBytes.length - 1);
-
       try (RocksDBBackend.ValueIterator iterator =
-               (RocksDBBackend.ValueIterator) rocksDB.values(columnFamilyName, seek)) {
+               (RocksDBBackend.ValueIterator) rocksDB.values(columnFamilyName, keyBytes)) {
         result = Lists.newArrayList();
         while (iterator.hasNext()) {
           byte[] targetKeyBytes = iterator.key();
-          if (isPrefixKey(targetKeyBytes, seek)) {
-            byte[] value = Arrays.copyOf(targetKeyBytes, targetKeyBytes.length);
+          if (isPrefixKey(targetKeyBytes, keyBytes)) {
+            byte[] value = Arrays.copyOfRange(targetKeyBytes, keyBytes.length, targetKeyBytes.length);
             result.add(value);
           }
           iterator.next();
@@ -110,28 +101,29 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
   /**
    * Merge key and element into guava cache and rocksdb.
    */
-  public void merge(RowData key, byte[] elementBytes) {
-    final byte[] keyBytes = serializeKey(key);
-    ByteArrayWrapper keyWrap = wrap(keyBytes);
+  public void merge(RowData joinKey, byte[] elementBytes) throws IOException {
+    byte[] joinKeyBytes = serializeKey(joinKey);
+    byte[] joinKeyAndPrimaryKeyBytes = Bytes.mergeByte(joinKeyBytes, elementBytes);
+    ByteArrayWrapper keyWrap = wrap(joinKeyBytes);
     if (guavaCache.getIfPresent(keyWrap) != null) {
       guavaCache.invalidate(keyWrap);
     }
-    rocksDB.put(columnFamilyName, elementBytes, EMPTY);
+    rocksDB.put(columnFamilyName, joinKeyAndPrimaryKeyBytes, EMPTY);
   }
 
-  public void delete(RowData key, byte[] elementBytes) throws IOException {
-    final byte[] keyBytes = serializeKey(key);
-    ByteArrayWrapper keyWrap = wrap(keyBytes);
+  public void delete(RowData joinKey, byte[] elementBytes) throws IOException {
+    final byte[] joinKeyBytes = serializeKey(joinKey);
+    ByteArrayWrapper keyWrap = wrap(joinKeyBytes);
     if (guavaCache.getIfPresent(keyWrap) != null) {
       guavaCache.invalidate(keyWrap);
     }
-    if (rocksDB.get(columnFamilyName, elementBytes) != null) {
-      rocksDB.delete(columnFamilyName, elementBytes);
+    byte[] joinKeyAndPrimaryKeyBytes = Bytes.mergeByte(joinKeyBytes, elementBytes);
+    if (rocksDB.get(columnFamilyName, joinKeyAndPrimaryKeyBytes) != null) {
+      rocksDB.delete(columnFamilyName, joinKeyAndPrimaryKeyBytes);
     }
   }
 
-  protected byte[] serializeKey(RowData key) {
-    LogRecordV1 logData = new LogRecordV1(key);
-    return keySerialization.serializeRow(logData);
+  protected byte[] serializeKey(RowData key) throws IOException {
+    return serializeKey(keySerializer, key);
   }
 }

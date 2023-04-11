@@ -18,12 +18,8 @@
 
 package com.netease.arctic.flink.lookup;
 
-import com.netease.arctic.flink.shuffle.LogRecordV1;
-import com.netease.arctic.log.LogDataJsonDeserialization;
-import com.netease.arctic.log.LogDataJsonSerialization;
 import com.netease.arctic.utils.SchemaUtil;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.iceberg.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,26 +41,14 @@ public interface KVTable extends Serializable, Closeable {
 
   void close();
 
-  default LogDataJsonSerialization<RowData> createKeySerialization(Schema arcticTableSchema, List<String> keys) {
+  default BinaryRowDataSerializerWrapper createKeySerializer(
+      Schema arcticTableSchema, List<String> keys) {
     Schema keySchema = SchemaUtil.convertFieldsToSchema(arcticTableSchema, keys);
-    return new LogDataJsonSerialization<>(keySchema, LogRecordV1.fieldGetterFactory);
+    return new BinaryRowDataSerializerWrapper(keySchema);
   }
 
-  default LogDataJsonSerialization<RowData> createValueSerialization(Schema projectSchema) {
-    return new LogDataJsonSerialization<>(projectSchema, LogRecordV1.fieldGetterFactory);
-  }
-
-  default BinaryRowDataSerializer createValueSerializer(Schema projectSchema) {
-    return new BinaryRowDataSerializer(projectSchema.asStruct().fields().size());
-  }
-
-  default LogDataJsonDeserialization<RowData> createValueDeserialization(Schema projectSchema) {
-    return
-        new LogDataJsonDeserialization<>(
-            projectSchema,
-            LogRecordV1.factory,
-            LogRecordV1.arrayFactory,
-            LogRecordV1.mapFactory);
+  default BinaryRowDataSerializerWrapper createValueSerializer(Schema projectSchema) {
+    return new BinaryRowDataSerializerWrapper(projectSchema);
   }
 
   static KVTable create(

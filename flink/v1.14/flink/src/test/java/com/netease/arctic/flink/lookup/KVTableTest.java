@@ -19,6 +19,7 @@
 package com.netease.arctic.flink.lookup;
 
 
+import com.netease.arctic.utils.SchemaUtil;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
@@ -26,7 +27,6 @@ import org.apache.flink.table.data.GenericRowData;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.binary.BinaryRowData;
-import org.apache.flink.table.data.writer.BinaryRowWriter;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.types.logical.RowType;
@@ -70,7 +70,6 @@ public class KVTableTest {
     BinaryRowDataSerializer binaryRowDataSerializer = new BinaryRowDataSerializer(3);
 
     GenericRowData genericRowData = (GenericRowData) row(1, "2", 3);
-//    BinaryRowData record = toBinaryRowData(genericRowData);
     RowType rowType = FlinkSchemaUtil.convert(arcticSchema);
     RowDataSerializer rowDataSerializer = new RowDataSerializer(rowType);
     BinaryRowData record = rowDataSerializer.toBinaryRow(genericRowData);
@@ -84,16 +83,27 @@ public class KVTableTest {
     Assert.assertEquals(record.getInt(0), desRowData.getInt(0));
     Assert.assertEquals(record.getInt(1), desRowData.getInt(1));
     Assert.assertEquals(record.getInt(2), desRowData.getInt(2));
-  }
 
-  private BinaryRowData toBinaryRowData(GenericRowData genericRowData) {
-    BinaryRowData record = new BinaryRowData(3);
-    BinaryRowWriter outputWriter = new BinaryRowWriter(record);
-    for (int i = 0; i < 3; i++) {
-      outputWriter.writeInt(i, i * 100);
-    }
-    outputWriter.complete();
-    return record;
+    // test join key rowData
+    binaryRowDataSerializer = new BinaryRowDataSerializer(2);
+    List<String> keys = Lists.newArrayList("id", "grade");
+    Schema keySchema = SchemaUtil.convertFieldsToSchema(arcticSchema, keys);
+    rowType = FlinkSchemaUtil.convert(keySchema);
+    rowDataSerializer = new RowDataSerializer(rowType);
+    KeyRowData keyRowData = new KeyRowData(new int[]{0, 1}, row(2, "3", 4));
+    KeyRowData keyRowData1 = new KeyRowData(new int[]{0, 1}, row(2, "3", 4));
+
+    BinaryRowData binaryRowData = rowDataSerializer.toBinaryRow(keyRowData);
+    view.clear();
+    binaryRowDataSerializer.serialize(binaryRowData, view);
+    byte[] rowBytes = view.getCopyOfBuffer();
+
+    BinaryRowData binaryRowData1 = rowDataSerializer.toBinaryRow(keyRowData1);
+    view.clear();
+    binaryRowDataSerializer.serialize(binaryRowData1, view);
+    byte[] rowBytes1 = view.getCopyOfBuffer();
+    Assert.assertArrayEquals(rowBytes1, rowBytes);
+
   }
 
   @Test
@@ -144,6 +154,7 @@ public class KVTableTest {
              )) {
       RowData expected = row(1, "2", 3);
       upsertAndAssert(secondaryIndexTable, upsertStream(expected), row(1), expected);
+      upsertAndAssert(secondaryIndexTable, null, row(1), expected);
 
       expected = row(1, "2", 4);
       upsertAndAssert(secondaryIndexTable, upsertStream(expected), row(1), expected);
@@ -165,7 +176,9 @@ public class KVTableTest {
 
   private void upsertAndAssert(
       KVTable table, Iterator<RowData> upsertStream, RowData... rows) throws IOException {
-    table.upsert(upsertStream);
+    if (upsertStream != null) {
+      table.upsert(upsertStream);
+    }
     for (int i = 0; i < rows.length; i = i + 2) {
       RowData key = rows[i], expected = rows[i + 1];
       List<RowData> values = table.get(key);

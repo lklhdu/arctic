@@ -19,14 +19,13 @@
 package com.netease.arctic.flink.lookup;
 
 import com.ibm.icu.util.ByteArrayWrapper;
-import com.netease.arctic.flink.shuffle.LogRecordV1;
-import com.netease.arctic.log.LogDataJsonDeserialization;
-import com.netease.arctic.log.LogDataJsonSerialization;
 import com.netease.arctic.utils.map.RocksDBBackend;
 import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
+import org.apache.flink.types.RowKind;
+
+import java.io.IOException;
 
 public abstract class RocksDBState<V> {
   protected RocksDBBackend rocksDB;
@@ -34,29 +33,41 @@ public abstract class RocksDBState<V> {
   protected Cache<ByteArrayWrapper, V> guavaCache;
 
   protected final String columnFamilyName;
-  protected LogDataJsonSerialization<RowData> keySerialization;
+  protected BinaryRowDataSerializerWrapper keySerializer;
 
-  protected BinaryRowDataSerializer valueSerializer;
-  protected LogDataJsonDeserialization<RowData> valueDeserialization;
+  protected BinaryRowDataSerializerWrapper valueSerializer;
 
   public RocksDBState(
       RocksDBBackend rocksDB,
       String columnFamilyName,
       long lruMaximumSize,
-      LogDataJsonSerialization<RowData> keySerialization,
-      BinaryRowDataSerializer valueSerializer,
-      LogDataJsonDeserialization<RowData> valueDeserialization) {
+      BinaryRowDataSerializerWrapper keySerializer,
+      BinaryRowDataSerializerWrapper valueSerializer) {
     this.rocksDB = rocksDB;
     this.guavaCache = CacheBuilder.newBuilder().maximumSize(lruMaximumSize).build();
     this.columnFamilyName = columnFamilyName;
-    this.keySerialization = keySerialization;
+    this.keySerializer = keySerializer;
     this.valueSerializer = valueSerializer;
-    this.valueDeserialization = valueDeserialization;
   }
 
-  protected byte[] serializeKey(RowData key) {
-    LogRecordV1 logData = new LogRecordV1(key);
-    return keySerialization.serializeRow(logData);
+  protected byte[] serializeKey(RowData key) throws IOException {
+    return serializeKey(keySerializer, key);
+  }
+
+  protected byte[] serializeKey(
+      BinaryRowDataSerializerWrapper keySerializer,
+      RowData key) throws IOException {
+    // key has a different RowKind would serialize different byte[], so unify the RowKind as INSERT.
+    byte[] result;
+    if (key.getRowKind() != RowKind.INSERT) {
+      RowKind rowKind = key.getRowKind();
+      key.setRowKind(RowKind.INSERT);
+      result = keySerializer.serialize(key);
+      key.setRowKind(rowKind);
+      return result;
+    }
+    key.setRowKind(RowKind.INSERT);
+    return keySerializer.serialize(key);
   }
 
   protected ByteArrayWrapper wrap(byte[] bytes) {

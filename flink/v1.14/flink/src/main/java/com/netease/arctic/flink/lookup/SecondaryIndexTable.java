@@ -47,11 +47,9 @@ public class SecondaryIndexTable extends UniqueIndexTable {
         stateFactory.createSetState(
             "secondaryIndex",
             lruCacheSize,
-            createKeySerialization(projectSchema, joinKeys),
-            createKeySerialization(projectSchema, primaryKeys),
-            createValueSerializer(projectSchema),
-            createValueDeserialization(projectSchema)
-        );
+            createKeySerializer(projectSchema, joinKeys),
+            createKeySerializer(projectSchema, primaryKeys),
+            createValueSerializer(projectSchema));
 
     List<String> fields = projectSchema.asStruct().fields()
         .stream().map(Types.NestedField::name).collect(Collectors.toList());
