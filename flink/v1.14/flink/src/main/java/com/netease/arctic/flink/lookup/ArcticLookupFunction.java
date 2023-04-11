@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static com.netease.arctic.flink.util.ArcticUtils.loadArcticTable;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
 public class ArcticLookupFunction extends TableFunction<RowData> {
@@ -72,7 +73,6 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
         String.format(
             "Only keyed arctic table support lookup join, this table [%s] is an unkeyed table.", arcticTable.name()));
 
-    this.arcticTable = arcticTable;
     this.joinKeys = joinKeys;
     this.projectSchema = projectSchema;
     this.lruCacheSize = cacheMaxRows;
@@ -82,6 +82,10 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
 
   @Override
   public void open(FunctionContext context) throws IOException {
+    if (arcticTable == null) {
+      arcticTable = loadArcticTable(loader).asKeyedTable();
+    }
+    arcticTable.refresh();
     kvTable = KVTable.create(
         new StateFactory(generateRocksDBPath(context, arcticTable.name())),
         arcticTable.asKeyedTable().primaryKeySpec().fieldNames(),
@@ -149,7 +153,9 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
 
   @Override
   public void close() throws Exception {
-    kvTable.close();
+    if (kvTable != null) {
+      kvTable.close();
+    }
   }
 
   private String generateRocksDBPath(FunctionContext context, String tableName) {
