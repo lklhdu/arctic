@@ -24,6 +24,7 @@ import org.apache.flink.shaded.guava30.com.google.common.cache.Cache;
 import org.apache.flink.shaded.guava30.com.google.common.cache.CacheBuilder;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.RowKind;
+import org.rocksdb.ColumnFamilyHandle;
 
 import java.io.IOException;
 
@@ -33,6 +34,7 @@ public abstract class RocksDBState<V> {
   protected Cache<ByteArrayWrapper, V> guavaCache;
 
   protected final String columnFamilyName;
+  protected final ColumnFamilyHandle columnFamilyHandle;
   protected BinaryRowDataSerializerWrapper keySerializer;
 
   protected BinaryRowDataSerializerWrapper valueSerializer;
@@ -48,6 +50,7 @@ public abstract class RocksDBState<V> {
     this.columnFamilyName = columnFamilyName;
     this.keySerializer = keySerializer;
     this.valueSerializer = valueSerializer;
+    this.columnFamilyHandle = rocksDB.getColumnFamilyHandle(columnFamilyName);
   }
 
   protected byte[] serializeKey(RowData key) throws IOException {

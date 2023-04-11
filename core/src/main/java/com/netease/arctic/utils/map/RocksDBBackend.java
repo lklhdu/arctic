@@ -212,6 +212,17 @@ public class RocksDBBackend {
     }
   }
 
+  public void put(ColumnFamilyHandle columnFamilyHandle, byte[] key, byte[] value) {
+    try {
+      Validate.isTrue(key != null && value != null,
+          "values or keys in rocksdb can not be null!");
+      Validate.isTrue(columnFamilyHandle != null, "Column family handler couldn't be null.");
+      rocksDB.put(columnFamilyHandle, key, payload(value));
+    } catch (Exception e) {
+      throw new ArcticIOException(e);
+    }
+  }
+
   /**
    * Perform a single Delete operation.
    *
@@ -272,6 +283,18 @@ public class RocksDBBackend {
     try {
       Validate.isTrue(key != null, "keys in rocksdb can not be null!");
       byte[] val = rocksDB.get(handlesMap.get(columnFamilyName), key);
+      return val;
+    } catch (Exception e) {
+      throw new ArcticIOException(e);
+    }
+  }
+
+  public byte[] get(ColumnFamilyHandle columnFamilyHandle, byte[] key) {
+    Validate.isTrue(!closed);
+    try {
+      Validate.isTrue(key != null, "keys in rocksdb can not be null!");
+      Validate.notNull(columnFamilyHandle, "Column Family Handle couldn't be null!");
+      byte[] val = rocksDB.get(columnFamilyHandle, key);
       return val;
     } catch (Exception e) {
       throw new ArcticIOException(e);
@@ -352,6 +375,10 @@ public class RocksDBBackend {
 
   public List<ColumnFamilyDescriptor> listColumnFamilies() {
     return new ArrayList<>(descriptorMap.values());
+  }
+
+  public ColumnFamilyHandle getColumnFamilyHandle(String columnFamilyName) {
+    return handlesMap.get(columnFamilyName);
   }
 
   /**

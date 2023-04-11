@@ -52,7 +52,7 @@ public class RocksDBRecordState extends RocksDBState<byte[]> {
     ByteArrayWrapper key = wrap(keyBytes);
     byte[] recordBytes = guavaCache.getIfPresent(key);
     if (recordBytes == null) {
-      recordBytes = rocksDB.get(columnFamilyName, key.bytes);
+      recordBytes = rocksDB.get(columnFamilyHandle, key.bytes);
       if (recordBytes != null) {
         guavaCache.put(key, recordBytes);
       }
@@ -69,7 +69,7 @@ public class RocksDBRecordState extends RocksDBState<byte[]> {
     Preconditions.checkNotNull(value);
 
     byte[] valueBytes = serializeValue(value);
-    rocksDB.put(columnFamilyName, keyBytes, valueBytes);
+    rocksDB.put(columnFamilyHandle, keyBytes, valueBytes);
 
     // Speed up the initialization process of Lookup Join Function
     ByteArrayWrapper key = wrap(keyBytes);
