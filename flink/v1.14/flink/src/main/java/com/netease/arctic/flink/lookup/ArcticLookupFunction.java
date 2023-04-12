@@ -143,6 +143,7 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
     nextLoadTime = System.currentTimeMillis() + 1000 * 10;
 
     loading = true;
+    long batchStart = System.currentTimeMillis();
     while (incrementalLoader.hasNext()) {
       long start = System.currentTimeMillis();
       try (CloseableIterator<RowData> iterator = incrementalLoader.next()) {
@@ -150,6 +151,7 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
       }
       LOG.info("Split task fetched, cost {}ms.", System.currentTimeMillis() - start);
     }
+    LOG.info("These batch tasks completed, cost {}ms.", System.currentTimeMillis() - batchStart);
     loading = false;
   }
 
