@@ -38,6 +38,7 @@ public abstract class RocksDBState<V> {
   protected BinaryRowDataSerializerWrapper keySerializer;
 
   protected BinaryRowDataSerializerWrapper valueSerializer;
+  protected long lruSize;
 
   public RocksDBState(
       RocksDBBackend rocksDB,
@@ -51,6 +52,7 @@ public abstract class RocksDBState<V> {
     this.keySerializer = keySerializer;
     this.valueSerializer = valueSerializer;
     this.columnFamilyHandle = rocksDB.getColumnFamilyHandle(columnFamilyName);
+    this.lruSize = lruMaximumSize;
   }
 
   protected byte[] serializeKey(RowData key) throws IOException {

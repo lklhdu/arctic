@@ -285,7 +285,7 @@ public class TestJoin extends FlinkTestBase {
 //    sql("create table d (op_time timestamp(3), watermark for op_time as op_time) like %s", table);
 
     TableResult result = exec("select u.name, u.id, dim.info, dim.name dname from `user` as u left join  " + table +
-        "/*+OPTIONS('streaming'='true')*/ for system_time as of u.ptm as dim" +
+        "/*+OPTIONS('lookup.cache.max-rows'='10002')*/ for system_time as of u.ptm as dim" +
         " on u.id = dim.id  ");
 
     CommonTestUtils.waitForJobStatus(result.getJobClient().get(), Lists.newArrayList(JobStatus.RUNNING),

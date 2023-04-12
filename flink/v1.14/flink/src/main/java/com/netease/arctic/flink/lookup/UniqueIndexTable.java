@@ -36,6 +36,8 @@ public class UniqueIndexTable implements KVTable {
 
   protected int[] uniqueKeyIndexMapping;
 
+  protected long lruSize;
+
   public UniqueIndexTable(
       StateFactory stateFactory,
       List<String> primaryKeys,
@@ -51,6 +53,7 @@ public class UniqueIndexTable implements KVTable {
     List<String> fields = projectSchema.asStruct().fields()
         .stream().map(Types.NestedField::name).collect(Collectors.toList());
     this.uniqueKeyIndexMapping = primaryKeys.stream().mapToInt(fields::indexOf).toArray();
+    this.lruSize = lruCacheSize;
   }
 
   @Override
@@ -64,6 +67,12 @@ public class UniqueIndexTable implements KVTable {
     while (dataStream.hasNext()) {
       RowData value = dataStream.next();
       RowData key = new KeyRowData(uniqueKeyIndexMapping, value);
+      //  todo
+      if (lruSize == 10000) {
+        // ignore serializing and putting data into cache
+        continue;
+      }
+
       if (value.getRowKind() == RowKind.INSERT || value.getRowKind() == RowKind.UPDATE_AFTER) {
         recordState.put(key, value);
       } else {

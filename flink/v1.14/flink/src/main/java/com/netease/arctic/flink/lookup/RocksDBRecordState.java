@@ -69,6 +69,12 @@ public class RocksDBRecordState extends RocksDBState<byte[]> {
     Preconditions.checkNotNull(value);
 
     byte[] valueBytes = serializeValue(value);
+    // todo
+    if (lruSize == 10001) {
+      // ignore putting data into cache
+      return;
+    }
+
     rocksDB.put(columnFamilyHandle, keyBytes, valueBytes);
 
     // Speed up the initialization process of Lookup Join Function
