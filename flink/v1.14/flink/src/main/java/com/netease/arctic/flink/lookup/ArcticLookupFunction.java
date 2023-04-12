@@ -86,6 +86,11 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
       arcticTable = loadArcticTable(loader).asKeyedTable();
     }
     arcticTable.refresh();
+
+    LOG.info(
+        "projected schema {}.\n table schema {}.",
+        projectSchema,
+        arcticTable.schema());
     kvTable = KVTable.create(
         new StateFactory(generateRocksDBPath(context, arcticTable.name())),
         arcticTable.asKeyedTable().primaryKeySpec().fieldNames(),
