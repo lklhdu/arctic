@@ -144,9 +144,11 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
 
     loading = true;
     while (incrementalLoader.hasNext()) {
+      long start = System.currentTimeMillis();
       try (CloseableIterator<RowData> iterator = incrementalLoader.next()) {
         kvTable.upsert(iterator);
       }
+      LOG.info("Split task fetched, cost {}ms.", System.currentTimeMillis() - start);
     }
     loading = false;
   }

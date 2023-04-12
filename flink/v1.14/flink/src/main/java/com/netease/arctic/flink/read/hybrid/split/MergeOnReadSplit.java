@@ -63,11 +63,11 @@ public class MergeOnReadSplit extends ArcticSplit {
   @Override
   public String toString() {
     return MoreObjects.toStringHelper(this)
-        .add("insertTasks", toString(keyedTableScanTask.insertTasks()))
-        .add("baseTasks", toString(keyedTableScanTask.baseTasks()))
-        .add("arcticEquityDeletes", toString(keyedTableScanTask.arcticEquityDeletes()))
-        .add("cost", keyedTableScanTask.cost() / 1024 + " KB")
-        .add("recordCount", keyedTableScanTask.recordCount())
+        .add("\ninsertTasks", toString(keyedTableScanTask.insertTasks()))
+        .add("\nbaseTasks", toString(keyedTableScanTask.baseTasks()))
+        .add("\narcticEquityDeletes", toString(keyedTableScanTask.arcticEquityDeletes()))
+        .add("\ncost", keyedTableScanTask.cost() / 1024 + " KB")
+        .add("\nrecordCount", keyedTableScanTask.recordCount())
 
         .toString();
   }

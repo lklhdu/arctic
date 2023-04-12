@@ -103,11 +103,13 @@ public abstract class ArcticSplit implements SourceSplit, Serializable, Comparab
         .map(ArcticFileScanTask::file)
         .map(primaryKeyedFile ->
             MoreObjects.toStringHelper(primaryKeyedFile)
-                .add("file", primaryKeyedFile.path().toString())
-                .add("type", primaryKeyedFile.type().shortName())
-                .add("mask", primaryKeyedFile.node().mask())
-                .add("index", primaryKeyedFile.node().index())
-                .add("transactionId", primaryKeyedFile.transactionId())
+                .add("\n\tfile", primaryKeyedFile.path().toString())
+                .add("\n\ttype", primaryKeyedFile.type().shortName())
+                .add("\n\tmask", primaryKeyedFile.node().mask())
+                .add("\n\tindex", primaryKeyedFile.node().index())
+                .add("\n\ttransactionId", primaryKeyedFile.transactionId())
+                .add("\n\tfileSizeInBytes", primaryKeyedFile.fileSizeInBytes())
+                .add("\n\trecordCount", primaryKeyedFile.recordCount())
                 .toString()).collect(Collectors.toList()));
   }
 
