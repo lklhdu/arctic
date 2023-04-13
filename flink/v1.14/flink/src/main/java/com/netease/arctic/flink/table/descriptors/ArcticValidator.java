@@ -224,6 +224,12 @@ public class ArcticValidator extends ConnectorDescriptorValidator {
       .withDescription("The maximum number of rows in the lookup cache, beyond which the oldest row will expire." +
           " By default, lookup cache is 10000.");
 
+  public static final ConfigOption<Boolean> ROCKSDB_AUTO_COMPACTIONS = ConfigOptions
+      .key("rocksdb.auto-compactions")
+      .booleanType()
+      .defaultValue(true)
+      .withDescription("Enable automatic compactions.");
+
   @Override
   public void validate(DescriptorProperties properties) {
     String emitMode = properties.getString(ARCTIC_EMIT_MODE.key());

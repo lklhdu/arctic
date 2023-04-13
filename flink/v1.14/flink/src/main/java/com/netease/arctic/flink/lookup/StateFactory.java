@@ -19,6 +19,7 @@
 package com.netease.arctic.flink.lookup;
 
 import com.netease.arctic.utils.map.RocksDBBackend;
+import org.rocksdb.ColumnFamilyOptions;
 
 public class StateFactory {
 
@@ -34,7 +35,12 @@ public class StateFactory {
       long lruMaximumSize,
       BinaryRowDataSerializerWrapper keySerializer,
       BinaryRowDataSerializerWrapper valueSerializer) {
-    db.addColumnFamily(columnFamilyName);
+    ColumnFamilyOptions columnFamilyOptions = new ColumnFamilyOptions();
+    // todo lruMaximumSize 10003 == auto compaction false
+    if (lruMaximumSize == 10003) {
+      columnFamilyOptions.disableAutoCompactions();
+    }
+    db.addColumnFamily(columnFamilyName, columnFamilyOptions);
     return
         new RocksDBRecordState(
             db,

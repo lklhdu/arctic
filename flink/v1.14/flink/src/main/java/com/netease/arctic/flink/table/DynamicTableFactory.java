@@ -69,6 +69,7 @@ import static com.netease.arctic.flink.table.KafkaConnectorOptionsUtil.createKey
 import static com.netease.arctic.flink.table.KafkaConnectorOptionsUtil.createValueFormatProjection;
 import static com.netease.arctic.flink.table.KafkaConnectorOptionsUtil.getKafkaProperties;
 import static com.netease.arctic.flink.table.descriptors.ArcticValidator.ARCTIC_LOG_KAFKA_COMPATIBLE_ENABLE;
+import static com.netease.arctic.flink.table.descriptors.ArcticValidator.ROCKSDB_AUTO_COMPACTIONS;
 import static com.netease.arctic.flink.table.descriptors.ArcticValidator.SCAN_STARTUP_MODE_TIMESTAMP;
 import static com.netease.arctic.flink.util.CompatibleFlinkPropertyUtil.getLogTopic;
 import static com.netease.arctic.table.TableProperties.ENABLE_LOG_STORE;
@@ -230,6 +231,9 @@ public class DynamicTableFactory implements DynamicTableSourceFactory, DynamicTa
     options.add(ArcticValidator.DIM_TABLE_ENABLE);
     options.add(METASTORE_URL);
     options.add(ArcticValidator.ARCTIC_LOG_KAFKA_COMPATIBLE_ENABLE);
+
+    // rocksdb lookup
+    options.add(ROCKSDB_AUTO_COMPACTIONS);
     return options;
   }
 

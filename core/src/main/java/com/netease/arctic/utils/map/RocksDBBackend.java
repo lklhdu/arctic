@@ -173,6 +173,11 @@ public class RocksDBBackend {
     return new ColumnFamilyDescriptor(columnFamilyName, new ColumnFamilyOptions());
   }
 
+  private ColumnFamilyDescriptor getColumnFamilyDescriptor(
+      byte[] columnFamilyName, ColumnFamilyOptions columnFamilyOptions) {
+    return new ColumnFamilyDescriptor(columnFamilyName, columnFamilyOptions);
+  }
+
   /**
    * Perform single PUT on a column-family.
    *
@@ -338,11 +343,15 @@ public class RocksDBBackend {
    * @param columnFamilyName Column family name
    */
   public void addColumnFamily(String columnFamilyName) {
+    addColumnFamily(columnFamilyName, new ColumnFamilyOptions());
+  }
+
+  public void addColumnFamily(String columnFamilyName, ColumnFamilyOptions columnFamilyOptions) {
     Validate.isTrue(!closed);
 
     descriptorMap.computeIfAbsent(columnFamilyName, colFamilyName -> {
       try {
-        ColumnFamilyDescriptor descriptor = getColumnFamilyDescriptor(colFamilyName.getBytes());
+        ColumnFamilyDescriptor descriptor = getColumnFamilyDescriptor(colFamilyName.getBytes(), columnFamilyOptions);
         ColumnFamilyHandle handle = rocksDB.createColumnFamily(descriptor);
         handlesMap.put(colFamilyName, handle);
         return descriptor;
