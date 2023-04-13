@@ -18,6 +18,7 @@
 
 package com.netease.arctic.flink.lookup;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.RowKind;
 import org.apache.iceberg.Schema;
@@ -40,8 +41,8 @@ public class SecondaryIndexTable extends UniqueIndexTable {
       List<String> primaryKeys,
       List<String> joinKeys,
       long lruCacheSize,
-      Schema projectSchema) {
-    super(stateFactory, primaryKeys, lruCacheSize, projectSchema);
+      Schema projectSchema, Configuration config) {
+    super(stateFactory, primaryKeys, lruCacheSize, projectSchema, config);
 
     this.setState =
         stateFactory.createSetState(
@@ -49,7 +50,8 @@ public class SecondaryIndexTable extends UniqueIndexTable {
             lruCacheSize,
             createKeySerializer(projectSchema, joinKeys),
             createKeySerializer(projectSchema, primaryKeys),
-            createValueSerializer(projectSchema));
+            createValueSerializer(projectSchema),
+            config);
 
     List<String> fields = projectSchema.asStruct().fields()
         .stream().map(Types.NestedField::name).collect(Collectors.toList());

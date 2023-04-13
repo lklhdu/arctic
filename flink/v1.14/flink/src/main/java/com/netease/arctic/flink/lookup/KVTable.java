@@ -19,8 +19,10 @@
 package com.netease.arctic.flink.lookup;
 
 import com.netease.arctic.utils.SchemaUtil;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.io.CloseableIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +41,10 @@ public interface KVTable extends Serializable, Closeable {
 
   void upsert(Iterator<RowData> dataStream) throws IOException;
 
+  void initial(CloseableIterator<RowData> dataStream) throws IOException;
+
+  boolean initialized();
+
   void close();
 
   default BinaryRowDataSerializerWrapper createKeySerializer(
@@ -56,22 +62,27 @@ public interface KVTable extends Serializable, Closeable {
       List<String> primaryKeys,
       List<String> joinKeys,
       long lruCacheSize,
-      Schema projectSchema) {
+      Schema projectSchema,
+      Configuration config) {
     Set<String> joinKeySet = new HashSet<>(joinKeys);
     Set<String> primaryKeySet = new HashSet<>(primaryKeys);
     if (joinKeySet.size() > primaryKeySet.size() && joinKeySet.containsAll(primaryKeySet)) {
       LOG.info("create unique index table, join keys contain all primary keys, unique keys are {}, join keys are {}.",
           primaryKeys.toArray(), joinKeys.toArray());
-      return new UniqueIndexTable(stateFactory, joinKeys, lruCacheSize, projectSchema);
+      return new UniqueIndexTable(stateFactory, joinKeys, lruCacheSize, projectSchema, config);
     }
     if (new HashSet<>(primaryKeys).equals(new HashSet<>(joinKeys))) {
       LOG.info("create unique index table, unique keys are {}, join keys are {}.",
           primaryKeys.toArray(), joinKeys.toArray());
-      return new UniqueIndexTable(stateFactory, primaryKeys, lruCacheSize, projectSchema);
+      return new UniqueIndexTable(stateFactory, primaryKeys, lruCacheSize, projectSchema, config);
     } else {
       LOG.info("create secondary index table, unique keys are {}, join keys are {}.",
           primaryKeys.toArray(), joinKeys.toArray());
-      return new SecondaryIndexTable(stateFactory, primaryKeys, joinKeys, lruCacheSize, projectSchema);
+      return new SecondaryIndexTable(stateFactory, primaryKeys, joinKeys, lruCacheSize, projectSchema, config);
     }
   }
+
+  void waitWriteRocksDBCompleted();
+
+  void open();
 }

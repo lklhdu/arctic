@@ -19,7 +19,10 @@
 package com.netease.arctic.flink.lookup;
 
 import com.netease.arctic.utils.map.RocksDBBackend;
+import org.apache.flink.configuration.Configuration;
 import org.rocksdb.ColumnFamilyOptions;
+
+import static com.netease.arctic.flink.table.descriptors.ArcticValidator.ROCKSDB_WRITING_THREADS;
 
 public class StateFactory {
 
@@ -34,7 +37,8 @@ public class StateFactory {
       String columnFamilyName,
       long lruMaximumSize,
       BinaryRowDataSerializerWrapper keySerializer,
-      BinaryRowDataSerializerWrapper valueSerializer) {
+      BinaryRowDataSerializerWrapper valueSerializer,
+      Configuration config) {
     ColumnFamilyOptions columnFamilyOptions = new ColumnFamilyOptions();
     // todo lruMaximumSize 10003 == auto compaction false
     if (lruMaximumSize == 10003) {
@@ -47,7 +51,8 @@ public class StateFactory {
             columnFamilyName,
             lruMaximumSize,
             keySerializer,
-            valueSerializer);
+            valueSerializer,
+            config.getInteger(ROCKSDB_WRITING_THREADS));
   }
 
   public RocksDBSetState createSetState(
@@ -55,8 +60,8 @@ public class StateFactory {
       long lruMaximumSize,
       BinaryRowDataSerializerWrapper keySerialization,
       BinaryRowDataSerializerWrapper elementSerialization,
-      BinaryRowDataSerializerWrapper valueSerializer
-  ) {
+      BinaryRowDataSerializerWrapper valueSerializer,
+      Configuration config) {
     db.addColumnFamily(columnFamilyName);
     return new RocksDBSetState(
         db,
@@ -64,6 +69,7 @@ public class StateFactory {
         lruMaximumSize,
         keySerialization,
         elementSerialization,
-        valueSerializer);
+        valueSerializer,
+        config.getInteger(ROCKSDB_WRITING_THREADS));
   }
 }

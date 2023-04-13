@@ -20,6 +20,7 @@ package com.netease.arctic.flink.lookup;
 
 
 import com.netease.arctic.utils.SchemaUtil;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
 import org.apache.flink.shaded.guava30.com.google.common.collect.Lists;
@@ -52,6 +53,7 @@ public class KVTableTest {
   public TemporaryFolder temp = new TemporaryFolder();
   @Rule
   public TestName name = new TestName();
+  private Configuration config = new Configuration();
 
   private final Schema arcticSchema = new Schema(
       Types.NestedField.required(1, "id", Types.IntegerType.get()),
@@ -116,8 +118,8 @@ public class KVTableTest {
                  primaryKeys,
                  joinKeys,
                  2,
-                 arcticSchema
-             )) {
+                 arcticSchema,
+                 config)) {
       RowData expected = row(1, "2", 3);
       upsertAndAssert(uniqueIndexTable, upsertStream(expected), row(1, "2"), expected);
 
@@ -150,8 +152,8 @@ public class KVTableTest {
                  primaryKeys,
                  joinKeys,
                  2,
-                 arcticSchema
-             )) {
+                 arcticSchema,
+                 config)) {
       RowData expected = row(1, "2", 3);
       upsertAndAssert(secondaryIndexTable, upsertStream(expected), row(1), expected);
       upsertAndAssert(secondaryIndexTable, null, row(1), expected);

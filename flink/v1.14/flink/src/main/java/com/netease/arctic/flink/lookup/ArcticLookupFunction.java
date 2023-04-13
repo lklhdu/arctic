@@ -60,6 +60,7 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
   private boolean loading = false;
   private long nextLoadTime = Long.MIN_VALUE;
   private MixedIncrementalLoader<RowData> incrementalLoader;
+  private Configuration config;
 
   public ArcticLookupFunction(
       ArcticTable arcticTable,
@@ -67,7 +68,8 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
       Schema projectSchema,
       long cacheMaxRows,
       List<Expression> filters,
-      ArcticTableLoader tableLoader) {
+      ArcticTableLoader tableLoader,
+      Configuration config) {
     checkArgument(
         arcticTable.isKeyedTable(),
         String.format(
@@ -78,6 +80,7 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
     this.lruCacheSize = cacheMaxRows;
     this.filters = filters;
     this.loader = tableLoader;
+    this.config = config;
   }
 
   @Override
@@ -96,7 +99,9 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
         arcticTable.asKeyedTable().primaryKeySpec().fieldNames(),
         joinKeys,
         lruCacheSize,
-        projectSchema);
+        projectSchema,
+        config);
+    kvTable.open();
     this.incrementalLoader =
         new MixedIncrementalLoader<>(
             new MergeOnReadIncrementalPlanner(loader),
@@ -152,11 +157,20 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
     while (incrementalLoader.hasNext()) {
       long start = System.currentTimeMillis();
       try (CloseableIterator<RowData> iterator = incrementalLoader.next()) {
-        kvTable.upsert(iterator);
+        if (kvTable.initialized()) {
+          kvTable.upsert(iterator);
+        } else {
+          LOG.info("This table {} is still under initialization progress.", arcticTable.name());
+          kvTable.initial(iterator);
+        }
       }
       LOG.info("Split task fetched, cost {}ms.", System.currentTimeMillis() - start);
     }
-    LOG.info("These batch tasks completed, cost {}ms.", System.currentTimeMillis() - batchStart);
+    if (!kvTable.initialized()) {
+      kvTable.waitWriteRocksDBCompleted();
+    }
+    LOG.info("{} table lookup loading, these batch tasks completed, cost {}ms.",
+        arcticTable.name(), System.currentTimeMillis() - batchStart);
     loading = false;
   }
 

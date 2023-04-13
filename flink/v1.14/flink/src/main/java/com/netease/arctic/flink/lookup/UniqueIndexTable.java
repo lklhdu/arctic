@@ -18,9 +18,11 @@
 
 package com.netease.arctic.flink.lookup;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.RowKind;
 import org.apache.iceberg.Schema;
+import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.types.Types;
 
 import java.io.IOException;
@@ -42,18 +44,25 @@ public class UniqueIndexTable implements KVTable {
       StateFactory stateFactory,
       List<String> primaryKeys,
       long lruCacheSize,
-      Schema projectSchema) {
+      Schema projectSchema,
+      Configuration config) {
 
     recordState =
         stateFactory.createRecordState(
             "uniqueIndex",
             lruCacheSize,
             createKeySerializer(projectSchema, primaryKeys),
-            createValueSerializer(projectSchema));
+            createValueSerializer(projectSchema),
+            config);
     List<String> fields = projectSchema.asStruct().fields()
         .stream().map(Types.NestedField::name).collect(Collectors.toList());
     this.uniqueKeyIndexMapping = primaryKeys.stream().mapToInt(fields::indexOf).toArray();
     this.lruSize = lruCacheSize;
+  }
+
+  @Override
+  public void open() {
+    recordState.open();
   }
 
   @Override
@@ -82,7 +91,28 @@ public class UniqueIndexTable implements KVTable {
   }
 
   @Override
+  public void initial(CloseableIterator<RowData> dataStream) throws IOException {
+    while (dataStream.hasNext()) {
+      RowData value = dataStream.next();
+      RowData key = new KeyRowData(uniqueKeyIndexMapping, value);
+      recordState.batchWrite(key, value);
+    }
+    recordState.flush();
+  }
+
+  @Override
+  public boolean initialized() {
+    return recordState.initialized();
+  }
+
+  @Override
+  public void waitWriteRocksDBCompleted() {
+    recordState.waitWriteRocksDBDone();
+  }
+
+  @Override
   public void close() {
     recordState.close();
   }
+
 }

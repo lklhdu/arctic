@@ -44,13 +44,15 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
       long lruMaximumSize,
       BinaryRowDataSerializerWrapper keySerialization,
       BinaryRowDataSerializerWrapper elementSerialization,
-      BinaryRowDataSerializerWrapper valueSerializer) {
+      BinaryRowDataSerializerWrapper valueSerializer,
+      int writeRocksDBThreadNum) {
     super(
         rocksDB,
         columnFamilyName,
         lruMaximumSize,
         elementSerialization,
-        valueSerializer);
+        valueSerializer,
+        writeRocksDBThreadNum);
     this.keySerializer = keySerialization;
   }
 
@@ -123,7 +125,17 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
     }
   }
 
-  protected byte[] serializeKey(RowData key) throws IOException {
+  @Override
+  public void batchWrite(RowData key, RowData value) {
+    // todo
+  }
+
+  @Override
+  public void flush() {
+
+  }
+
+  public byte[] serializeKey(RowData key) throws IOException {
     return serializeKey(keySerializer, key);
   }
 }

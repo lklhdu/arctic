@@ -230,6 +230,12 @@ public class ArcticValidator extends ConnectorDescriptorValidator {
       .defaultValue(true)
       .withDescription("Enable automatic compactions.");
 
+  public static final ConfigOption<Integer> ROCKSDB_WRITING_THREADS = ConfigOptions
+      .key("rocksdb.writing-threads")
+      .intType()
+      .defaultValue(5)
+      .withDescription("Writing data into rocksDB thread number.");
+
   @Override
   public void validate(DescriptorProperties properties) {
     String emitMode = properties.getString(ARCTIC_EMIT_MODE.key());

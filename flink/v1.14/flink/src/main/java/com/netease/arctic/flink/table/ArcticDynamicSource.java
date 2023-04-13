@@ -215,6 +215,7 @@ public class ArcticDynamicSource implements ScanTableSource, SupportsFilterPushD
             projectedSchema,
             cacheMaxRows,
             filters,
-            tableLoader);
+            tableLoader,
+            config);
   }
 }

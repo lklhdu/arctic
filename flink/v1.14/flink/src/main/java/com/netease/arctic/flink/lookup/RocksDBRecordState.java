@@ -21,11 +21,16 @@ package com.netease.arctic.flink.lookup;
 import com.ibm.icu.util.ByteArrayWrapper;
 import com.netease.arctic.utils.map.RocksDBBackend;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
 
 import java.io.IOException;
 import java.util.Optional;
 
+/**
+ * A class representing a state backed by RocksDB for storing and retrieving key-value pairs
+ * of byte arrays.
+ */
 public class RocksDBRecordState extends RocksDBState<byte[]> {
 
   public RocksDBRecordState(
@@ -33,8 +38,45 @@ public class RocksDBRecordState extends RocksDBState<byte[]> {
       String columnFamilyName,
       long lruMaximumSize,
       BinaryRowDataSerializerWrapper keySerializer,
-      BinaryRowDataSerializerWrapper valueSerializer) {
-    super(rocksDB, columnFamilyName, lruMaximumSize, keySerializer, valueSerializer);
+      BinaryRowDataSerializerWrapper valueSerializer,
+      int writeRocksDBThreadNum) {
+    super(rocksDB, columnFamilyName, lruMaximumSize, keySerializer, valueSerializer, writeRocksDBThreadNum);
+  }
+
+  /**
+   * Writes a key-value pair to the sst file.
+   *
+   * @param key   The key of the pair.
+   * @param value The value of the pair.
+   */
+  @Override
+  public void batchWrite(RowData key, RowData value) throws IOException {
+    byte[] keyBytes = serializeKey(key);
+    byte[] valueBytes = serializeValue(value);
+    RocksDBRecord.OpType opType = convertToOpType(key.getRowKind());
+    rocksDBRecordQueue.add(RocksDBRecord.of(opType, keyBytes, valueBytes));
+  }
+
+  private RocksDBRecord.OpType convertToOpType(RowKind rowKind) {
+    switch (rowKind) {
+      case INSERT:
+      case UPDATE_AFTER:
+        return RocksDBRecord.OpType.PUT_BYTES;
+      case DELETE:
+      case UPDATE_BEFORE:
+        return RocksDBRecord.OpType.DELETE_BYTES;
+      default:
+        throw new IllegalArgumentException(String.format("Not support this rowKind %s", rowKind));
+    }
+  }
+
+  /**
+   * Flushes the sst write file to the database.
+   */
+  @Override
+  public void flush() {
+    // todo WriteBatch
+
   }
 
   /**
