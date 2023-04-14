@@ -224,6 +224,12 @@ public class ArcticValidator extends ConnectorDescriptorValidator {
       .withDescription("The maximum number of rows in the lookup cache, beyond which the oldest row will expire." +
           " By default, lookup cache is 10000.");
 
+  public static final ConfigOption<Long> LOOKUP_RELOADING_INTERVAL_SECONDS = ConfigOptions
+      .key("lookup.reloading.interval-seconds")
+      .longType()
+      .defaultValue(10L)
+      .withDescription("Configuration option for specifying the interval in seconds to reload lookup data in RocksDB.\n" +
+          "The default value is 10 seconds.");
   public static final ConfigOption<Boolean> ROCKSDB_AUTO_COMPACTIONS = ConfigOptions
       .key("rocksdb.auto-compactions")
       .booleanType()

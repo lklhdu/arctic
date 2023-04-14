@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static com.netease.arctic.flink.table.descriptors.ArcticValidator.LOOKUP_RELOADING_INTERVAL_SECONDS;
 import static com.netease.arctic.flink.util.ArcticUtils.loadArcticTable;
 import static org.apache.flink.util.Preconditions.checkArgument;
 
@@ -59,6 +60,7 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
   private final ArcticTableLoader loader;
   private boolean loading = false;
   private long nextLoadTime = Long.MIN_VALUE;
+  private final long reloadIntervalSeconds;
   private MixedIncrementalLoader<RowData> incrementalLoader;
   private Configuration config;
 
@@ -81,6 +83,7 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
     this.filters = filters;
     this.loader = tableLoader;
     this.config = config;
+    this.reloadIntervalSeconds = config.get(LOOKUP_RELOADING_INTERVAL_SECONDS);
   }
 
   @Override
@@ -149,8 +152,7 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
       LOG.info("Mixed table incremental loader is running.");
       return;
     }
-    // todo hard cod
-    nextLoadTime = System.currentTimeMillis() + 1000 * 10;
+    nextLoadTime = System.currentTimeMillis() + 1000 * reloadIntervalSeconds;
 
     loading = true;
     long batchStart = System.currentTimeMillis();
