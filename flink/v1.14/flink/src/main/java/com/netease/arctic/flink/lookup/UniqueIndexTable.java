@@ -22,7 +22,6 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.RowKind;
 import org.apache.iceberg.Schema;
-import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.types.Types;
 
 import java.io.IOException;
@@ -91,7 +90,7 @@ public class UniqueIndexTable implements KVTable {
   }
 
   @Override
-  public void initial(CloseableIterator<RowData> dataStream) throws IOException {
+  public void initial(Iterator<RowData> dataStream) throws IOException {
     while (dataStream.hasNext()) {
       RowData value = dataStream.next();
       RowData key = new KeyRowData(uniqueKeyIndexMapping, value);
@@ -107,7 +106,9 @@ public class UniqueIndexTable implements KVTable {
 
   @Override
   public void waitWriteRocksDBCompleted() {
+    LOG.info("Waiting for Record State initialization");
     recordState.waitWriteRocksDBDone();
+    LOG.info("The concurrent threads have finished writing data into the Record State.");
   }
 
   @Override

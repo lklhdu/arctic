@@ -60,6 +60,12 @@ public class SecondaryIndexTable extends UniqueIndexTable {
   }
 
   @Override
+  public void open() {
+    super.open();
+    setState.open();
+  }
+
+  @Override
   public List<RowData> get(RowData key) throws IOException {
     List<byte[]> uniqueKeys = setState.get(key);
     if (!uniqueKeys.isEmpty()) {
@@ -88,6 +94,34 @@ public class SecondaryIndexTable extends UniqueIndexTable {
         setState.delete(joinKey, uniqueKeyBytes);
       }
     }
+  }
+
+  @Override
+  public void initial(Iterator<RowData> dataStream) throws IOException {
+    while (dataStream.hasNext()) {
+      RowData value = dataStream.next();
+      RowData uniqueKey = new KeyRowData(uniqueKeyIndexMapping, value);
+      RowData joinKey = new KeyRowData(secondaryKeyIndexMapping, value);
+      byte[] uniqueKeyBytes = recordState.serializeKey(uniqueKey);
+
+      recordState.batchWrite(value.getRowKind(), uniqueKeyBytes, value);
+      setState.batchWrite(joinKey, uniqueKeyBytes);
+    }
+    recordState.flush();
+    setState.flush();
+  }
+
+  @Override
+  public boolean initialized() {
+    return recordState.initialized() && setState.initialized();
+  }
+
+  @Override
+  public void waitWriteRocksDBCompleted() {
+    super.waitWriteRocksDBCompleted();
+    LOG.info("Waiting for Set State initialization");
+    setState.waitWriteRocksDBDone();
+    LOG.info("The concurrent threads have finished writing data into the Set State.");
   }
 
   @Override

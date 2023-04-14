@@ -103,9 +103,9 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
   /**
    * Merge key and element into guava cache and rocksdb.
    */
-  public void merge(RowData joinKey, byte[] elementBytes) throws IOException {
+  public void merge(RowData joinKey, byte[] uniqueKeyBytes) throws IOException {
     byte[] joinKeyBytes = serializeKey(joinKey);
-    byte[] joinKeyAndPrimaryKeyBytes = Bytes.mergeByte(joinKeyBytes, elementBytes);
+    byte[] joinKeyAndPrimaryKeyBytes = Bytes.mergeByte(joinKeyBytes, uniqueKeyBytes);
     ByteArrayWrapper keyWrap = wrap(joinKeyBytes);
     if (guavaCache.getIfPresent(keyWrap) != null) {
       guavaCache.invalidate(keyWrap);
@@ -125,9 +125,11 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
     }
   }
 
-  @Override
-  public void batchWrite(RowData key, RowData value) {
-    // todo
+  public void batchWrite(RowData joinKey, byte[] uniqueKeyBytes) throws IOException {
+    byte[] joinKeyBytes = serializeKey(joinKey);
+    byte[] joinKeyAndPrimaryKeyBytes = Bytes.mergeByte(joinKeyBytes, uniqueKeyBytes);
+    RocksDBRecord.OpType opType = convertToOpType(joinKey.getRowKind());
+    rocksDBRecordQueue.add(RocksDBRecord.of(opType, joinKeyAndPrimaryKeyBytes, EMPTY));
   }
 
   @Override

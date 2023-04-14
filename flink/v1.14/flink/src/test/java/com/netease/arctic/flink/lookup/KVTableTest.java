@@ -47,6 +47,8 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
+import static com.netease.arctic.flink.table.descriptors.ArcticValidator.ROCKSDB_WRITING_THREADS;
+
 public class KVTableTest {
 
   @Rule
@@ -54,6 +56,7 @@ public class KVTableTest {
   @Rule
   public TestName name = new TestName();
   private Configuration config = new Configuration();
+  private List<String> primaryKeys = Lists.newArrayList("id", "grade");
 
   private final Schema arcticSchema = new Schema(
       Types.NestedField.required(1, "id", Types.IntegerType.get()),
@@ -109,8 +112,112 @@ public class KVTableTest {
   }
 
   @Test
+  public void testInitialUniqueKeyTable() throws IOException {
+    config.setInteger(ROCKSDB_WRITING_THREADS, 5);
+    List<String> joinKeys = Lists.newArrayList("id", "grade");
+    try (UniqueIndexTable uniqueIndexTable = (UniqueIndexTable) createTable(joinKeys)) {
+      uniqueIndexTable.open();
+
+      // During the initialization phase, the Merge-on-Read approach is used to retrieve data,
+      // which will only return INSERT data.
+      // When there are multiple entries with the same primary key, only one entry will be returned.
+      initTable(
+          uniqueIndexTable,
+          upsertStream(
+              row(RowKind.INSERT, 1, "1", 1),
+              row(RowKind.INSERT, 2, "2", 2),
+              row(RowKind.INSERT, 2, "3", 3),
+              row(RowKind.INSERT, 2, "4", 4),
+              row(RowKind.INSERT, 2, "5", 5)));
+
+      if (!uniqueIndexTable.initialized()) {
+        uniqueIndexTable.waitWriteRocksDBCompleted();
+      }
+
+      assertTable(
+          uniqueIndexTable,
+          row(1, "1"), row(1, "1", 1),
+          row(2, "2"), row(2, "2", 2),
+          row(2, "3"), row(2, "3", 3),
+          row(2, "4"), row(2, "4", 4),
+          row(2, "5"), row(2, "5", 5)
+      );
+
+      // upsert table
+      upsertTable(
+          uniqueIndexTable,
+          upsertStream(
+              row(RowKind.DELETE, 1, "1", 1),
+              row(RowKind.INSERT, 2, "2", 2),
+              row(RowKind.DELETE, 2, "2", 2),
+              row(RowKind.UPDATE_BEFORE, 3, "3", 4),
+              row(RowKind.UPDATE_AFTER, 3, "3", 5),
+              row(RowKind.INSERT, 4, "4", 4)));
+
+      assertTable(uniqueIndexTable,
+          row(1, "1"), null,
+          row(2, "2"), null,
+          row(3, "3"), row(3, "3", 5),
+          row(4, "4"), row(4, "4", 4));
+    }
+  }
+
+  @Test
+  public void testInitialSecondaryKeyTable() throws IOException {
+    // primary keys are id and grade.
+    List<String> joinKeys = Lists.newArrayList("id");
+    try (SecondaryIndexTable secondaryIndexTable = (SecondaryIndexTable) createTable(joinKeys)) {
+      secondaryIndexTable.open();
+
+      initTable(
+          secondaryIndexTable,
+          upsertStream(
+              row(RowKind.INSERT, 1, "1", 1),
+              row(RowKind.INSERT, 2, "2", 2),
+              row(RowKind.INSERT, 2, "3", 3),
+              row(RowKind.INSERT, 2, "4", 4),
+              row(RowKind.INSERT, 2, "5", 5)));
+
+      if (!secondaryIndexTable.initialized()) {
+        secondaryIndexTable.waitWriteRocksDBCompleted();
+      }
+
+      assertTableSet(
+          secondaryIndexTable,
+          row(1), row(1, "1", 1));
+      assertTableSet(
+          secondaryIndexTable,
+          row(2),
+          row(2, "2", 2),
+          row(2, "3", 3),
+          row(2, "4", 4),
+          row(2, "5", 5));
+
+      upsertTable(
+          secondaryIndexTable,
+          upsertStream(
+              row(RowKind.DELETE, 1, "1", 1),
+              row(RowKind.INSERT, 2, "2", 2),
+              row(RowKind.DELETE, 2, "2", 2),
+              row(RowKind.UPDATE_BEFORE, 3, "3", 4),
+              row(RowKind.UPDATE_AFTER, 3, "3", 5),
+              row(RowKind.INSERT, 3, "4", 4)));
+
+
+      assertTableSet(
+          secondaryIndexTable,
+          row(1), null);
+      assertTableSet(
+          secondaryIndexTable,
+          row(2), row(2, "3", 3), row(2, "4", 4), row(2, "5", 5));
+      assertTableSet(
+          secondaryIndexTable,
+          row(3), row(3, "3", 5), row(3, "4", 4));
+    }
+  }
+
+  @Test
   public void testUniqueKeyTable() throws IOException {
-    List<String> primaryKeys = Lists.newArrayList("id", "grade");
     List<String> joinKeys = Lists.newArrayList("id", "grade");
     try (UniqueIndexTable uniqueIndexTable =
              (UniqueIndexTable) KVTable.create(
@@ -121,12 +228,12 @@ public class KVTableTest {
                  arcticSchema,
                  config)) {
       RowData expected = row(1, "2", 3);
-      upsertAndAssert(uniqueIndexTable, upsertStream(expected), row(1, "2"), expected);
+      upsertTable(uniqueIndexTable, upsertStream(expected), row(1, "2"), expected);
 
       expected = row(1, "2", 4);
-      upsertAndAssert(uniqueIndexTable, upsertStream(expected), row(1, "2"), expected);
+      upsertTable(uniqueIndexTable, upsertStream(expected), row(1, "2"), expected);
 
-      upsertAndAssert(
+      upsertTable(
           uniqueIndexTable,
           upsertStream(
               row(RowKind.INSERT, 2, "3", 4),
@@ -143,7 +250,7 @@ public class KVTableTest {
   @Test
   public void testSecondaryIndexTable() throws IOException {
     dbPath = temp.newFolder().getPath();
-    List<String> primaryKeys = Lists.newArrayList("id", "grade");
+
     List<String> joinKeys = Lists.newArrayList("id");
 
     try (SecondaryIndexTable secondaryIndexTable =
@@ -155,13 +262,13 @@ public class KVTableTest {
                  arcticSchema,
                  config)) {
       RowData expected = row(1, "2", 3);
-      upsertAndAssert(secondaryIndexTable, upsertStream(expected), row(1), expected);
-      upsertAndAssert(secondaryIndexTable, null, row(1), expected);
+      upsertTable(secondaryIndexTable, upsertStream(expected), row(1), expected);
+      upsertTable(secondaryIndexTable, null, row(1), expected);
 
       expected = row(1, "2", 4);
-      upsertAndAssert(secondaryIndexTable, upsertStream(expected), row(1), expected);
+      upsertTable(secondaryIndexTable, upsertStream(expected), row(1), expected);
 
-      upsertAndAssert(
+      upsertTable(
           secondaryIndexTable,
           upsertStream(
               row(RowKind.INSERT, 2, "3", 4),
@@ -176,31 +283,83 @@ public class KVTableTest {
     }
   }
 
-  private void upsertAndAssert(
+  private KVTable createTable(List<String> joinKeys) {
+    return KVTable.create(
+        new StateFactory(dbPath),
+        primaryKeys,
+        joinKeys,
+        2,
+        arcticSchema,
+        config);
+  }
+
+  private void initTable(
+      KVTable table, Iterator<RowData> initStream) throws IOException {
+    if (initStream != null) {
+      table.initial(initStream);
+    }
+  }
+
+  private void upsertTable(
       KVTable table, Iterator<RowData> upsertStream, RowData... rows) throws IOException {
     if (upsertStream != null) {
       table.upsert(upsertStream);
     }
+  }
+
+  private void assertTable(KVTable table, RowData... rows) throws IOException {
+    // Loop through the rows array in steps of 2
     for (int i = 0; i < rows.length; i = i + 2) {
+      // Get the key and expected value at the current index and the next index
       RowData key = rows[i], expected = rows[i + 1];
+
       List<RowData> values = table.get(key);
+      Assert.assertNotNull(values);
       if (expected == null) {
         Assert.assertEquals(0, values.size());
-      } else {
-        if (values.get(0) instanceof BinaryRowData) {
-          BinaryRowData binaryRowData = (BinaryRowData) values.get(0);
-          for (int j = 0; j < binaryRowData.getArity(); j++) {
-            switch (j) {
-              case 0:
-              case 2:
-                Assert.assertEquals(expected.getInt(j), binaryRowData.getInt(j));
-                break;
-              case 1:
-                Assert.assertEquals(expected.getString(j), binaryRowData.getString(j));
-                break;
-            }
-          }
-        }
+        continue;
+      }
+      Assert.assertEquals(expected.toString(), 1, values.size());
+      RowData actual = values.get(0);
+      assertRecord(expected, actual);
+    }
+  }
+
+  private void assertTableSet(KVTable table, RowData key, RowData... expects) throws IOException {
+    List<RowData> values = table.get(key);
+    if (expects == null) {
+      Assert.assertEquals(0, values.size());
+      return;
+    }
+    for (int i = 0; i < expects.length; i = i + 1) {
+      // Get the key and expected value at the current index and the next index
+      RowData expected = expects[i];
+
+      RowData actual = values.get(i);
+      assertRecord(expected, actual);
+    }
+  }
+
+  private void assertRecord(RowData expected, RowData actual) {
+    if (!(actual instanceof BinaryRowData)) {
+      throw new IllegalArgumentException("Only support BinaryRowData");
+    }
+    BinaryRowData binaryRowData = (BinaryRowData) actual;
+    for (int j = 0; j < binaryRowData.getArity(); j++) {
+      switch (j) {
+        case 0:
+        case 2:
+          Assert.assertEquals(
+              String.format("expected:%s, actual:%s.", expected.toString(), actual),
+              expected.getInt(j),
+              binaryRowData.getInt(j));
+          break;
+        case 1:
+          Assert.assertEquals(
+              String.format("expected:%s, actual:%s.", expected, actual),
+              expected.getString(j),
+              binaryRowData.getString(j));
+          break;
       }
     }
   }

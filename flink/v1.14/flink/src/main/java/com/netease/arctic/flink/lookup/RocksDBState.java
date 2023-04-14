@@ -86,9 +86,9 @@ public abstract class RocksDBState<V> {
     rocksDBRecordQueue = new ConcurrentLinkedQueue<>();
     writeRocksDBThreadFutures =
         IntStream.range(0, writeRocksDBThreadNum).mapToObj(value ->
-                writeRocksDBService.submit(new WriteRocksDBTask()))
+                writeRocksDBService.submit(
+                    new WriteRocksDBTask(String.format("writing-rocksDB-cf_%s-thread-%d", columnFamilyName, value))))
             .collect(Collectors.toList());
-    LOG.info("create {} writing rocksDB threads. ", writeRocksDBThreadNum);
   }
 
 
@@ -117,8 +117,6 @@ public abstract class RocksDBState<V> {
   protected ByteArrayWrapper wrap(byte[] bytes) {
     return new ByteArrayWrapper(bytes, bytes.length);
   }
-
-  public abstract void batchWrite(RowData key, RowData value) throws IOException;
 
   public abstract void flush();
 
@@ -153,6 +151,24 @@ public abstract class RocksDBState<V> {
     return initialized.get();
   }
 
+
+  protected RocksDBRecord.OpType convertToOpType(RowKind rowKind) {
+    switch (rowKind) {
+      case INSERT:
+      case UPDATE_AFTER:
+        return RocksDBRecord.OpType.PUT_BYTES;
+      case DELETE:
+      case UPDATE_BEFORE:
+        return RocksDBRecord.OpType.DELETE_BYTES;
+      default:
+        throw new IllegalArgumentException(String.format("Not support this rowKind %s", rowKind));
+    }
+  }
+
+  /**
+   * Closes the RocksDB instance and cleans up the Guava cache.
+   * <p>Additionally, it shuts down the write-service and clears the RocksDB record queue if they exist.
+   */
   public void close() {
     rocksDB.close();
     guavaCache.cleanUp();
@@ -167,12 +183,23 @@ public abstract class RocksDBState<V> {
   }
 
   /**
-   * A Runnable task that writes the records{@link RocksDBRecord} to RocksDB.
+   * This task is running during the initialization phase to write data{@link RocksDBRecord} to RocksDB.
+   *
+   * <p>During the initialization phase, the Merge-on-Read approach is used to retrieve data,
+   * which will only return INSERT data.
+   * When there are multiple entries with the same primary key, only one entry will be returned.
    */
   class WriteRocksDBTask implements Runnable {
 
+    private final String name;
+
+    public WriteRocksDBTask(String name) {
+      this.name = name;
+    }
+
     @Override
     public void run() {
+      LOG.info("{} starting.", name);
       while (!initialized.get()) {
         RocksDBRecord record = rocksDBRecordQueue.poll();
         if (record != null) {
@@ -186,14 +213,9 @@ public abstract class RocksDBState<V> {
             default:
               throw new IllegalArgumentException(String.format("Not support this OpType %s", record.opType()));
           }
-
-          // Speed up the initialization process of Lookup Join Function
-//          ByteArrayWrapper key = wrap(record.keyBytes());
-//          if (guavaCache.getIfPresent(wrap(record.keyBytes())) != null) {
-//            guavaCache.put(key, record.valueBytes());
-//          }
         }
       }
+      LOG.info("{} stopping.", name);
     }
   }
 }

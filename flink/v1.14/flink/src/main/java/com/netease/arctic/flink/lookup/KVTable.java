@@ -22,7 +22,6 @@ import com.netease.arctic.utils.SchemaUtil;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.data.RowData;
 import org.apache.iceberg.Schema;
-import org.apache.iceberg.io.CloseableIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,7 +40,7 @@ public interface KVTable extends Serializable, Closeable {
 
   void upsert(Iterator<RowData> dataStream) throws IOException;
 
-  void initial(CloseableIterator<RowData> dataStream) throws IOException;
+  void initial(Iterator<RowData> dataStream) throws IOException;
 
   boolean initialized();
 

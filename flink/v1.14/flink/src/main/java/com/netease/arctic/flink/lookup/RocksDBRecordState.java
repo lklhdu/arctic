@@ -23,6 +23,8 @@ import com.netease.arctic.utils.map.RocksDBBackend;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.Preconditions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Optional;
@@ -32,6 +34,7 @@ import java.util.Optional;
  * of byte arrays.
  */
 public class RocksDBRecordState extends RocksDBState<byte[]> {
+  private static final Logger LOG = LoggerFactory.getLogger(RocksDBRecordState.class);
 
   public RocksDBRecordState(
       RocksDBBackend rocksDB,
@@ -49,25 +52,15 @@ public class RocksDBRecordState extends RocksDBState<byte[]> {
    * @param key   The key of the pair.
    * @param value The value of the pair.
    */
-  @Override
   public void batchWrite(RowData key, RowData value) throws IOException {
     byte[] keyBytes = serializeKey(key);
-    byte[] valueBytes = serializeValue(value);
-    RocksDBRecord.OpType opType = convertToOpType(key.getRowKind());
-    rocksDBRecordQueue.add(RocksDBRecord.of(opType, keyBytes, valueBytes));
+    batchWrite(key.getRowKind(), keyBytes, value);
   }
 
-  private RocksDBRecord.OpType convertToOpType(RowKind rowKind) {
-    switch (rowKind) {
-      case INSERT:
-      case UPDATE_AFTER:
-        return RocksDBRecord.OpType.PUT_BYTES;
-      case DELETE:
-      case UPDATE_BEFORE:
-        return RocksDBRecord.OpType.DELETE_BYTES;
-      default:
-        throw new IllegalArgumentException(String.format("Not support this rowKind %s", rowKind));
-    }
+  public void batchWrite(RowKind rowKind, byte[] keyBytes, RowData value) throws IOException {
+    byte[] valueBytes = serializeValue(value);
+    RocksDBRecord.OpType opType = convertToOpType(rowKind);
+    rocksDBRecordQueue.add(RocksDBRecord.of(opType, keyBytes, valueBytes));
   }
 
   /**
