@@ -22,6 +22,7 @@ import com.netease.arctic.utils.map.RocksDBBackend;
 import org.apache.flink.configuration.Configuration;
 import org.rocksdb.ColumnFamilyOptions;
 
+import static com.netease.arctic.flink.table.descriptors.ArcticValidator.ROCKSDB_AUTO_COMPACTIONS;
 import static com.netease.arctic.flink.table.descriptors.ArcticValidator.ROCKSDB_WRITING_THREADS;
 
 public class StateFactory {
@@ -40,8 +41,7 @@ public class StateFactory {
       BinaryRowDataSerializerWrapper valueSerializer,
       Configuration config) {
     ColumnFamilyOptions columnFamilyOptions = new ColumnFamilyOptions();
-    // todo lruMaximumSize 10003 == auto compaction false
-    if (lruMaximumSize == 10003) {
+    if (!config.get(ROCKSDB_AUTO_COMPACTIONS)) {
       columnFamilyOptions.disableAutoCompactions();
     }
     db.addColumnFamily(columnFamilyName, columnFamilyOptions);
@@ -62,7 +62,11 @@ public class StateFactory {
       BinaryRowDataSerializerWrapper elementSerialization,
       BinaryRowDataSerializerWrapper valueSerializer,
       Configuration config) {
-    db.addColumnFamily(columnFamilyName);
+    ColumnFamilyOptions columnFamilyOptions = new ColumnFamilyOptions();
+    if (!config.get(ROCKSDB_AUTO_COMPACTIONS)) {
+      columnFamilyOptions.disableAutoCompactions();
+    }
+    db.addColumnFamily(columnFamilyName, columnFamilyOptions);
     return new RocksDBSetState(
         db,
         columnFamilyName,

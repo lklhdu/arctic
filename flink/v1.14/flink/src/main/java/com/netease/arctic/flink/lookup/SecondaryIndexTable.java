@@ -41,7 +41,8 @@ public class SecondaryIndexTable extends UniqueIndexTable {
       List<String> primaryKeys,
       List<String> joinKeys,
       long lruCacheSize,
-      Schema projectSchema, Configuration config) {
+      Schema projectSchema,
+      Configuration config) {
     super(stateFactory, primaryKeys, lruCacheSize, projectSchema, config);
 
     this.setState =
