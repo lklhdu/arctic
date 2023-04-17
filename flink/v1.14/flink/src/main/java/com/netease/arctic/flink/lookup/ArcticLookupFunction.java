@@ -158,14 +158,17 @@ public class ArcticLookupFunction extends TableFunction<RowData> {
     long batchStart = System.currentTimeMillis();
     while (incrementalLoader.hasNext()) {
       long start = System.currentTimeMillis();
-      try (CloseableIterator<RowData> iterator = incrementalLoader.next()) {
-        if (kvTable.initialized()) {
-          kvTable.upsert(iterator);
-        } else {
-          LOG.info("This table {} is still under initialization progress.", arcticTable.name());
-          kvTable.initial(iterator);
+      arcticTable.io().doAs(() -> {
+        try (CloseableIterator<RowData> iterator = incrementalLoader.next()) {
+          if (kvTable.initialized()) {
+            kvTable.upsert(iterator);
+          } else {
+            LOG.info("This table {} is still under initialization progress.", arcticTable.name());
+            kvTable.initial(iterator);
+          }
         }
-      }
+        return null;
+      });
       LOG.info("Split task fetched, cost {}ms.", System.currentTimeMillis() - start);
     }
     if (!kvTable.initialized()) {
