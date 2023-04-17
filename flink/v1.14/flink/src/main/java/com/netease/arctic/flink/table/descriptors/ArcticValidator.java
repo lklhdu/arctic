@@ -233,7 +233,7 @@ public class ArcticValidator extends ConnectorDescriptorValidator {
   public static final ConfigOption<Boolean> ROCKSDB_AUTO_COMPACTIONS = ConfigOptions
       .key("rocksdb.auto-compactions")
       .booleanType()
-      .defaultValue(true)
+      .defaultValue(false)
       .withDescription("Enable automatic compactions.");
 
   public static final ConfigOption<Integer> ROCKSDB_WRITING_THREADS = ConfigOptions
