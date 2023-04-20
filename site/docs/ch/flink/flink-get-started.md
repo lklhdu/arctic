@@ -18,19 +18,27 @@ Flink Connector 包括：
 
 版本说明：
 
-| Connector Version | Flink Version | Dependent Iceberg Version | 下载                                                                                                                         |
-| ----------------- |---------------|  ----------------- |----------------------------------------------------------------------------------------------------------------------------|
-| 0.4.0             | 1.12.x        | 0.13.2            | [flink-1.12-0.4.0](https://github.com/NetEase/arctic/releases/download/v0.4.0/arctic-flink-runtime-1.12-0.4.0.jar) |
-| 0.4.0             | 1.14.x        | 0.13.2            | [flink-1.14-0.4.0](https://github.com/NetEase/arctic/releases/download/v0.4.0/arctic-flink-runtime-1.14-0.4.0.jar) |
-| 0.4.0             | 1.15.x        | 0.13.2            | [flink-1.15-0.4.0](https://github.com/NetEase/arctic/releases/download/v0.4.0/arctic-flink-runtime-1.15-0.4.0.jar) |
+| Connector Version | Flink Version | Dependent Iceberg Version | 下载                                                                                                                 |
+|-------------------|---------------|  ----------------- |--------------------------------------------------------------------------------------------------------------------|
+| 0.4.1             | 1.12.x        | 0.13.2            | [flink-1.12-0.4.1](https://github.com/NetEase/arctic/releases/download/v0.4.1/arctic-flink-runtime-1.12-0.4.1.jar) |
+| 0.4.1             | 1.14.x        | 0.13.2            | [flink-1.14-0.4.1](https://github.com/NetEase/arctic/releases/download/v0.4.1/arctic-flink-runtime-1.14-0.4.1.jar) |
+| 0.4.1             | 1.15.x        | 0.13.2            | [flink-1.15-0.4.1](https://github.com/NetEase/arctic/releases/download/v0.4.1/arctic-flink-runtime-1.15-0.4.1.jar) |
 
 Kafka 作为 Logstore 版本说明：
 
 | Connector Version | Flink Version | Kafka Versions |
-| ----------------- |---------------|  ----------------- |
-| 0.4.0             | 1.12.x        | 0.10.2.\*<br> 0.11.\*<br> 1.\*<br> 2.\*<br> 3.\*            | 
-| 0.4.0             | 1.14.x        | 0.10.2.\*<br> 0.11.\*<br> 1.\*<br> 2.\*<br> 3.\*            | 
-| 0.4.0             | 1.15.x        | 0.10.2.\*<br> 0.11.\*<br> 1.\*<br> 2.\*<br> 3.\*            | 
+|-------------------|---------------|  ----------------- |
+| 0.4.1             | 1.12.x        | 0.10.2.\*<br> 0.11.\*<br> 1.\*<br> 2.\*<br> 3.\*            | 
+| 0.4.1             | 1.14.x        | 0.10.2.\*<br> 0.11.\*<br> 1.\*<br> 2.\*<br> 3.\*            | 
+| 0.4.1             | 1.15.x        | 0.10.2.\*<br> 0.11.\*<br> 1.\*<br> 2.\*<br> 3.\*            | 
+
+Pulsar 作为 Logstore 版本说明：
+
+| Connector Version | Flink Version | Pulsar Versions |
+|-------------------|---------------|  ---------------- |
+| 0.4.1             | 1.12.x        | 2.\*           | 
+| 0.4.1             | 1.14.x        | 2.\*          | 
+| 0.4.1             | 1.15.x        | 2.\*         | 
 
 
 对 Arctic 工程自行编译也可以获取该 runtime jar
