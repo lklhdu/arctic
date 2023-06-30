@@ -18,13 +18,11 @@
 
 package com.netease.arctic.utils.map;
 
-import com.netease.arctic.iceberg.optimize.StructLikeWrapper;
-import com.netease.arctic.utils.SerializationUtils;
-import org.apache.iceberg.relocated.com.google.common.collect.Maps;
+import com.netease.arctic.iceberg.StructLikeWrapper;
+import com.netease.arctic.utils.SerializationUtil;
 import org.apache.iceberg.types.Types;
 
 import javax.annotation.Nullable;
-import java.util.HashMap;
 
 /**
  * Copy form iceberg {@link org.apache.iceberg.util.StructLikeMap}. Make using StructLikeWrapper more cheap
@@ -41,9 +39,10 @@ public class StructLikeSpillableMap<T> extends StructLikeBaseMap<T> {
 
   private StructLikeSpillableMap(Types.StructType type, Long maxInMemorySizeInBytes, @Nullable String backendBaseDir) {
     super(type);
-    this.wrapperMap = new SimpleSpillableMap(maxInMemorySizeInBytes, backendBaseDir,
-        SerializationUtils.createStructLikeWrapperSerializer(structLikeWrapperFactory),
-        SerializationUtils.createJavaSimpleSerializer());
+    this.wrapperMap = new SimpleSpillableMap<>(maxInMemorySizeInBytes, backendBaseDir,
+        SerializationUtil.createStructLikeWrapperSerializer(structLikeWrapperFactory),
+        SerializationUtil.createJavaSimpleSerializer(),
+        new StructLikeWrapperSizeEstimator(), new DefaultSizeEstimator<>());
   }
 
   @Override

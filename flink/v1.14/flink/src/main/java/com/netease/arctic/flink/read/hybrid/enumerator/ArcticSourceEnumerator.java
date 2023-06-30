@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
@@ -131,18 +132,6 @@ public class ArcticSourceEnumerator extends AbstractArcticEnumerator {
           0,
           snapshotDiscoveryIntervalMs
       );
-
-      context.callAsync(
-          this::assignSplits,
-          (unused, t) -> {
-            if (t != null) {
-              throw new FlinkRuntimeException(
-                  "Failed to assign arctic split due to ", t);
-            }
-          },
-          1000,
-          500
-      );
     }
   }
 
@@ -165,7 +154,11 @@ public class ArcticSourceEnumerator extends AbstractArcticEnumerator {
     }
     lock.set(true);
     LOG.info("begin to plan splits current offset {}.", enumeratorPosition.get());
-    return continuousSplitPlanner.planSplits(enumeratorPosition.get());
+    Optional.ofNullable(scanContext.filters()).ifPresent(
+        filters -> filters.forEach(
+            expression -> LOG.info("Arctic source filter expression: {}.", expression.toString())));
+    return continuousSplitPlanner.planSplits(enumeratorPosition.get(), scanContext.filters());
+
   }
 
   private void handleResultOfSplits(ContinuousEnumerationResult enumerationResult, Throwable t) {

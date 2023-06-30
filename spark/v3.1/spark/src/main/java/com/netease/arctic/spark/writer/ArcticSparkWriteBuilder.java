@@ -20,8 +20,6 @@ package com.netease.arctic.spark.writer;
 
 import com.netease.arctic.catalog.ArcticCatalog;
 import com.netease.arctic.table.ArcticTable;
-import com.netease.arctic.table.blocker.Blocker;
-import com.netease.arctic.table.blocker.TableBlockerManager;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
@@ -44,9 +42,7 @@ public class ArcticSparkWriteBuilder implements WriteBuilder, SupportsDynamicOve
 
     BatchWrite asOverwriteByFilter(Expression overwriteExpr);
 
-    BatchWrite asUpsertWrite();
-
-    BatchWrite asMergeBatchWrite();
+    BatchWrite asDeltaWrite();
   }
 
   protected final CaseInsensitiveStringMap options;
@@ -99,10 +95,8 @@ public class ArcticSparkWriteBuilder implements WriteBuilder, SupportsDynamicOve
         return write.asOverwriteByFilter(overwriteExpr);
       case OVERWRITE_DYNAMIC:
         return write.asDynamicOverwrite();
-      case UPSERT:
-        return write.asUpsertWrite();
-      case MERGE:
-        return write.asMergeBatchWrite();
+      case DELTAWRITE:
+        return write.asDeltaWrite();
       default:
         throw new UnsupportedOperationException("unsupported write mode: " + writeMode);
     }

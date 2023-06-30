@@ -19,6 +19,7 @@
 package com.netease.arctic.table;
 
 import com.netease.arctic.AmsClient;
+import com.netease.arctic.ams.api.TableFormat;
 import com.netease.arctic.ams.api.TableMeta;
 import com.netease.arctic.io.ArcticFileIO;
 import com.netease.arctic.op.KeyedPartitionRewrite;
@@ -27,12 +28,12 @@ import com.netease.arctic.op.OverwriteBaseFiles;
 import com.netease.arctic.op.RewritePartitions;
 import com.netease.arctic.op.UpdateKeyedTableProperties;
 import com.netease.arctic.scan.BasicKeyedTableScan;
-import com.netease.arctic.scan.ChangeTableBasicIncrementalScan;
 import com.netease.arctic.scan.ChangeTableIncrementalScan;
 import com.netease.arctic.scan.KeyedTableScan;
 import com.netease.arctic.trace.SnapshotSummary;
 import com.netease.arctic.utils.TablePropertyUtil;
 import org.apache.iceberg.AppendFiles;
+import org.apache.iceberg.ArcticChangeTableScan;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Table;
@@ -50,6 +51,11 @@ import java.util.Map;
 public class BasicKeyedTable implements KeyedTable {
   private final String tableLocation;
   private final PrimaryKeySpec primaryKeySpec;
+
+  /**
+   * @deprecated since 0.5.0, will be removed in 0.6.0;
+   */
+  @Deprecated
   protected final AmsClient client;
 
   protected final BaseTable baseTable;
@@ -81,6 +87,11 @@ public class BasicKeyedTable implements KeyedTable {
   @Override
   public TableIdentifier id() {
     return TableIdentifier.of(tableMeta.getTableIdentifier());
+  }
+
+  @Override
+  public TableFormat format() {
+    return TableFormat.MIXED_ICEBERG;
   }
 
   @Override
@@ -131,16 +142,17 @@ public class BasicKeyedTable implements KeyedTable {
   @Override
   public void refresh() {
     try {
-      this.tableMeta = client.getTable(this.tableMeta.getTableIdentifier());
+      if (client != null) {
+        this.tableMeta = client.getTable(this.tableMeta.getTableIdentifier());
+      }
     } catch (TException e) {
       throw new IllegalStateException("failed refresh table from ams", e);
     }
 
     baseTable.refresh();
-    if (PrimaryKeySpec.noPrimaryKey().equals(primaryKeySpec())) {
-      return;
+    if (primaryKeySpec().primaryKeyExisted()) {
+      changeTable.refresh();
     }
-    changeTable.refresh();
   }
 
   @Override
@@ -196,27 +208,26 @@ public class BasicKeyedTable implements KeyedTable {
     return new KeyedPartitionRewrite(this);
   }
 
-  public static class BasicInternalTable extends BasicUnkeyedTable implements BaseTable {
+  public static class BaseInternalTable extends BasicUnkeyedTable implements BaseTable {
 
-    public BasicInternalTable(
+    public BaseInternalTable(
         TableIdentifier tableIdentifier, Table baseIcebergTable, ArcticFileIO arcticFileIO,
-        AmsClient client) {
-      super(tableIdentifier, baseIcebergTable, arcticFileIO, client);
+        AmsClient client, Map<String, String> catalogProperties) {
+      super(tableIdentifier, baseIcebergTable, arcticFileIO, client, catalogProperties);
     }
-
   }
 
   public static class ChangeInternalTable extends BasicUnkeyedTable implements ChangeTable {
 
     public ChangeInternalTable(
         TableIdentifier tableIdentifier, Table changeIcebergTable, ArcticFileIO arcticFileIO,
-        AmsClient client) {
-      super(tableIdentifier, changeIcebergTable, arcticFileIO, client);
+        AmsClient client, Map<String, String> catalogProperties) {
+      super(tableIdentifier, changeIcebergTable, arcticFileIO, client, catalogProperties);
     }
 
     @Override
-    public ChangeTableIncrementalScan newChangeScan() {
-      return new ChangeTableBasicIncrementalScan(this);
+    public ChangeTableIncrementalScan newScan() {
+      return new ArcticChangeTableScan(operations(), this);
     }
   }
 }

@@ -18,17 +18,16 @@
 
 package com.netease.arctic.trino.arctic;
 
-import com.netease.arctic.hive.HiveTableTestBase;
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
-import java.util.HashMap;
-import java.util.List;
 import org.apache.iceberg.data.GenericRecord;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
 
 import static com.netease.arctic.trino.arctic.TestHiveTableBaseForTrino.COLUMN_NAME_ARRAY;
 import static com.netease.arctic.trino.arctic.TestHiveTableBaseForTrino.COLUMN_NAME_D;
@@ -52,49 +51,49 @@ public class HiveTestRecords {
 
     {
       ImmutableMap columns = ImmutableMap.builder().put(
-          COLUMN_NAME_ID, 3
-      ).put(
-          COLUMN_NAME_OP_TIME, LocalDateTime.of(2022, 1, 3, 12, 0, 0)
-      ).put(
-          COLUMN_NAME_OP_TIME_WITH_ZONE, OffsetDateTime.of(
+              COLUMN_NAME_ID, 3
+          ).put(
+              COLUMN_NAME_OP_TIME, LocalDateTime.of(2022, 1, 3, 12, 0, 0)
+          ).put(
+              COLUMN_NAME_OP_TIME_WITH_ZONE, OffsetDateTime.of(
                   LocalDateTime.of(2022, 1, 3, 12, 0, 0), ZoneOffset.UTC)
-      )
-      .put(
-          COLUMN_NAME_D, new BigDecimal("102")
-      ).put(
-          COLUMN_NAME_NAME, "jake"
-      ).put(
-          COLUMN_NAME_MAP, ImmutableMap.of("map_key", "map_value")
-      ).put(
-          COLUMN_NAME_ARRAY, ImmutableList.of("array_element")
-      ).put(
-          COLUMN_NAME_STRUCT, structRecord.copy(COLUMN_NAME_STRUCT_SUB1, "struct_sub1", COLUMN_NAME_STRUCT_SUB2,
-              "struct_sub2")
-      ).build();
+          )
+          .put(
+              COLUMN_NAME_D, new BigDecimal("102")
+          ).put(
+              COLUMN_NAME_NAME, "jake"
+          ).put(
+              COLUMN_NAME_MAP, ImmutableMap.of("map_key", "map_value")
+          ).put(
+              COLUMN_NAME_ARRAY, ImmutableList.of("array_element")
+          ).put(
+              COLUMN_NAME_STRUCT, structRecord.copy(COLUMN_NAME_STRUCT_SUB1, "struct_sub1", COLUMN_NAME_STRUCT_SUB2,
+                  "struct_sub2")
+          ).build();
       builder.add(record.copy(columns));
     }
 
     {
       ImmutableMap columns = ImmutableMap.builder().put(
-          COLUMN_NAME_ID, 4
-      ).put(
-          COLUMN_NAME_OP_TIME, LocalDateTime.of(2022, 1, 4, 12, 0, 0)
-      ).put(
-          COLUMN_NAME_OP_TIME_WITH_ZONE, OffsetDateTime.of(
-              LocalDateTime.of(2022, 1, 4, 12, 0, 0), ZoneOffset.UTC)
-      )
-      .put(
-          COLUMN_NAME_D, new BigDecimal("103")
-      ).put(
-          COLUMN_NAME_NAME, "sam"
-      ).put(
-          COLUMN_NAME_MAP, ImmutableMap.of("map_key", "map_value")
-      ).put(
-          COLUMN_NAME_ARRAY, ImmutableList.of("array_element")
-      ).put(
-          COLUMN_NAME_STRUCT, structRecord.copy(COLUMN_NAME_STRUCT_SUB1, "struct_sub1", COLUMN_NAME_STRUCT_SUB2,
-              "struct_sub2")
-      ).build();
+              COLUMN_NAME_ID, 4
+          ).put(
+              COLUMN_NAME_OP_TIME, LocalDateTime.of(2022, 1, 4, 12, 0, 0)
+          ).put(
+              COLUMN_NAME_OP_TIME_WITH_ZONE, OffsetDateTime.of(
+                  LocalDateTime.of(2022, 1, 4, 12, 0, 0), ZoneOffset.UTC)
+          )
+          .put(
+              COLUMN_NAME_D, new BigDecimal("103")
+          ).put(
+              COLUMN_NAME_NAME, "sam"
+          ).put(
+              COLUMN_NAME_MAP, ImmutableMap.of("map_key", "map_value")
+          ).put(
+              COLUMN_NAME_ARRAY, ImmutableList.of("array_element")
+          ).put(
+              COLUMN_NAME_STRUCT, structRecord.copy(COLUMN_NAME_STRUCT_SUB1, "struct_sub1", COLUMN_NAME_STRUCT_SUB2,
+                  "struct_sub2")
+          ).build();
 
       builder.add(record.copy(columns));
     }

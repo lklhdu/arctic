@@ -21,25 +21,26 @@ package com.netease.arctic.spark.sql.execution
 
 import com.netease.arctic.op.OverwriteBaseFiles
 import com.netease.arctic.spark.table.{ArcticIcebergSparkTable, ArcticSparkTable}
-import com.netease.arctic.utils.TablePropertyUtil
 import org.apache.iceberg.expressions.Expressions
+import org.apache.iceberg.relocated.com.google.common.base.Preconditions
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.connector.catalog.Table
 import org.apache.spark.sql.execution.datasources.v2.V2CommandExec
 
-case class TruncateArcticTableExec(table: Table,
-                                   partitionSpec: Option[TablePartitionSpec]) extends V2CommandExec {
+case class TruncateArcticTableExec(table: Table, partitionSpec: Option[TablePartitionSpec])
+  extends V2CommandExec {
   override protected def run(): Seq[InternalRow] = {
-    if (partitionSpec.isDefined) {
-      throw new UnsupportedOperationException("Not support truncate partition temporarily")
-    }
+    Preconditions.checkArgument(partitionSpec.isEmpty,
+      "Catalog support only one table format now.",
+      Array.empty[AnyRef]: _*)
     table match {
       case arctic: ArcticSparkTable =>
         if (arctic.table().isKeyedTable) {
           val txId = arctic.table().asKeyedTable().beginTransaction(null);
-          val overwriteBaseFiles: OverwriteBaseFiles = arctic.table().asKeyedTable().newOverwriteBaseFiles()
+          val overwriteBaseFiles: OverwriteBaseFiles =
+            arctic.table().asKeyedTable().newOverwriteBaseFiles()
           overwriteBaseFiles.overwriteByRowFilter(Expressions.alwaysTrue())
           overwriteBaseFiles.updateOptimizedSequenceDynamically(txId)
           overwriteBaseFiles.commit()

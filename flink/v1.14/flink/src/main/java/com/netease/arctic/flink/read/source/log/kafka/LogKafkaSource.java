@@ -19,6 +19,7 @@
 package com.netease.arctic.flink.read.source.log.kafka;
 
 import com.netease.arctic.flink.read.internals.KafkaSource;
+import com.netease.arctic.flink.read.internals.KafkaSourceFetcherManager;
 import com.netease.arctic.flink.read.source.log.LogSourceHelper;
 import com.netease.arctic.flink.util.CompatibleFlinkPropertyUtil;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -28,12 +29,10 @@ import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.synchronization.FutureCompletingBlockingQueue;
-import org.apache.flink.connector.kafka.source.KafkaSourceBuilder;
 import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.connector.kafka.source.enumerator.subscriber.KafkaSubscriber;
 import org.apache.flink.connector.kafka.source.metrics.KafkaSourceReaderMetrics;
 import org.apache.flink.connector.kafka.source.reader.deserializer.KafkaRecordDeserializationSchema;
-import org.apache.flink.connector.kafka.source.reader.fetcher.KafkaSourceFetcherManager;
 import org.apache.flink.connector.kafka.source.split.KafkaPartitionSplit;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;

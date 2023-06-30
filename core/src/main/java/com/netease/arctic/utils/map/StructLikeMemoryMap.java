@@ -18,7 +18,7 @@
 
 package com.netease.arctic.utils.map;
 
-import com.netease.arctic.iceberg.optimize.StructLikeWrapper;
+import com.netease.arctic.iceberg.StructLikeWrapper;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.types.Types;
 
@@ -37,7 +37,7 @@ public class StructLikeMemoryMap<T> extends StructLikeBaseMap<T> {
 
   private StructLikeMemoryMap(Types.StructType type) {
     super(type);
-    this.wrapperMap = new SimpleMemoryMap();
+    this.wrapperMap = new SimpleMemoryMap<>();
   }
 
   @Override
@@ -46,7 +46,7 @@ public class StructLikeMemoryMap<T> extends StructLikeBaseMap<T> {
   }
 
 
-  private class SimpleMemoryMap<T> implements SimpleMap<StructLikeWrapper, T> {
+  private static class SimpleMemoryMap<T> implements SimpleMap<StructLikeWrapper, T> {
 
     HashMap<StructLikeWrapper, T> map = Maps.newHashMap();
 

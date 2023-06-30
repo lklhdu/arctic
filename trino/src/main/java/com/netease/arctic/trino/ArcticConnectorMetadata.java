@@ -19,6 +19,7 @@
 package com.netease.arctic.trino;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterators;
 import com.netease.arctic.catalog.ArcticCatalog;
 import com.netease.arctic.table.ArcticTable;
 import com.netease.arctic.table.TableIdentifier;
@@ -30,7 +31,9 @@ import io.trino.spi.TrinoException;
 import io.trino.spi.connector.BeginTableExecuteResult;
 import io.trino.spi.connector.ColumnHandle;
 import io.trino.spi.connector.ColumnMetadata;
+import io.trino.spi.connector.ConnectorAnalyzeMetadata;
 import io.trino.spi.connector.ConnectorInsertTableHandle;
+import io.trino.spi.connector.ConnectorMergeTableHandle;
 import io.trino.spi.connector.ConnectorMetadata;
 import io.trino.spi.connector.ConnectorOutputMetadata;
 import io.trino.spi.connector.ConnectorOutputTableHandle;
@@ -54,13 +57,13 @@ import io.trino.spi.statistics.TableStatistics;
 import org.apache.iceberg.exceptions.NoSuchTableException;
 
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static io.trino.plugin.hive.util.HiveUtil.isHiveSystemSchema;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -161,13 +164,14 @@ public class ArcticConnectorMetadata implements ConnectorMetadata {
   }
 
   @Override
-  public Stream<TableColumnsMetadata> streamTableColumns(ConnectorSession session, SchemaTablePrefix prefix) {
+  public Iterator<TableColumnsMetadata> streamTableColumns(ConnectorSession session, SchemaTablePrefix prefix) {
     if (prefix.getTable().isPresent()) {
       ArcticTable arcticTable = null;
       try {
         arcticTable = getArcticTable(new SchemaTableName(prefix.getSchema().get(), prefix.getTable().get()));
       } catch (NoSuchTableException e) {
-        return Stream.empty();
+        List<TableColumnsMetadata> schemaTableNames = ImmutableList.of();
+        return schemaTableNames.iterator();
       }
       if (arcticTable.isKeyedTable()) {
         return keyedConnectorMetadata.streamTableColumns(session, prefix);
@@ -175,7 +179,7 @@ public class ArcticConnectorMetadata implements ConnectorMetadata {
         return icebergMetadata.streamTableColumns(session, prefix);
       }
     } else {
-      return Stream.concat(
+      return Iterators.concat(
           keyedConnectorMetadata.streamTableColumns(session, prefix),
           icebergMetadata.streamTableColumns(session, prefix));
     }
@@ -341,70 +345,6 @@ public class ArcticConnectorMetadata implements ConnectorMetadata {
   }
 
   @Override
-  public ConnectorTableHandle beginDelete(
-      ConnectorSession session,
-      ConnectorTableHandle tableHandle,
-      RetryMode retryMode) {
-    if (tableHandle instanceof KeyedTableHandle) {
-      throw new TrinoException(NOT_SUPPORTED, "key table UnSupport delete");
-    } else {
-      return icebergMetadata.beginDelete(session, tableHandle, retryMode);
-    }
-  }
-
-  @Override
-  public void finishDelete(ConnectorSession session, ConnectorTableHandle tableHandle, Collection<Slice> fragments) {
-    if (tableHandle instanceof KeyedTableHandle) {
-      throw new TrinoException(NOT_SUPPORTED, "key table UnSupport delete");
-    } else {
-      icebergMetadata.finishDelete(session, tableHandle, fragments);
-    }
-  }
-
-  @Override
-  public ColumnHandle getDeleteRowIdColumnHandle(ConnectorSession session, ConnectorTableHandle tableHandle) {
-    if (tableHandle instanceof KeyedTableHandle) {
-      throw new TrinoException(NOT_SUPPORTED, "key table UnSupport delete");
-    } else {
-      return icebergMetadata.getDeleteRowIdColumnHandle(session, tableHandle);
-    }
-  }
-
-  @Override
-  public ConnectorTableHandle beginUpdate(
-      ConnectorSession session,
-      ConnectorTableHandle tableHandle,
-      List<ColumnHandle> updatedColumns,
-      RetryMode retryMode) {
-    if (tableHandle instanceof KeyedTableHandle) {
-      throw new TrinoException(NOT_SUPPORTED, "key table UnSupport update");
-    } else {
-      return icebergMetadata.beginUpdate(session, tableHandle, updatedColumns, retryMode);
-    }
-  }
-
-  @Override
-  public void finishUpdate(ConnectorSession session, ConnectorTableHandle tableHandle, Collection<Slice> fragments) {
-    if (tableHandle instanceof KeyedTableHandle) {
-      throw new TrinoException(NOT_SUPPORTED, "key table UnSupport update");
-    } else {
-      icebergMetadata.finishUpdate(session, tableHandle, fragments);
-    }
-  }
-
-  @Override
-  public ColumnHandle getUpdateRowIdColumnHandle(
-      ConnectorSession session,
-      ConnectorTableHandle tableHandle,
-      List<ColumnHandle> updatedColumns) {
-    if (tableHandle instanceof KeyedTableHandle) {
-      throw new TrinoException(NOT_SUPPORTED, "key table UnSupport update");
-    } else {
-      return icebergMetadata.getUpdateRowIdColumnHandle(session, tableHandle, updatedColumns);
-    }
-  }
-
-  @Override
   public OptionalLong executeDelete(ConnectorSession session, ConnectorTableHandle tableHandle) {
     if (tableHandle instanceof KeyedTableHandle) {
       throw new TrinoException(NOT_SUPPORTED, "key table UnSupport execute delete");
@@ -441,9 +381,63 @@ public class ArcticConnectorMetadata implements ConnectorMetadata {
   @Override
   public TableStatistics getTableStatistics(ConnectorSession session, ConnectorTableHandle tableHandle) {
     if (tableHandle instanceof KeyedTableHandle) {
-      return TableStatistics.empty();
+      return keyedConnectorMetadata.getTableStatistics(session, tableHandle);
     } else {
       return icebergMetadata.getTableStatistics(session, tableHandle);
+    }
+  }
+
+  @Override
+  public ConnectorAnalyzeMetadata getStatisticsCollectionMetadata(
+      ConnectorSession session,
+      ConnectorTableHandle tableHandle,
+      Map<String, Object> analyzeProperties) {
+    if (tableHandle instanceof KeyedTableHandle) {
+      throw new TrinoException(NOT_SUPPORTED, "This connector does not support analyze");
+    } else {
+      return icebergMetadata.getStatisticsCollectionMetadata(session, tableHandle, analyzeProperties);
+    }
+  }
+
+  @Override
+  public ConnectorTableHandle beginStatisticsCollection(ConnectorSession session, ConnectorTableHandle tableHandle) {
+    if (tableHandle instanceof KeyedTableHandle) {
+      throw new TrinoException(NOT_SUPPORTED, "This connector does not support analyze");
+    } else {
+      return icebergMetadata.beginStatisticsCollection(session, tableHandle);
+    }
+  }
+
+  @Override
+  public ColumnHandle getMergeRowIdColumnHandle(ConnectorSession session, ConnectorTableHandle tableHandle) {
+    if (tableHandle instanceof KeyedTableHandle) {
+      throw new TrinoException(NOT_SUPPORTED, "Key table does not support modifying table rows");
+    } else {
+      return icebergMetadata.getMergeRowIdColumnHandle(session, tableHandle);
+    }
+  }
+
+  @Override
+  public ConnectorMergeTableHandle beginMerge(
+      ConnectorSession session,
+      ConnectorTableHandle tableHandle, RetryMode retryMode) {
+    if (tableHandle instanceof KeyedTableHandle) {
+      throw new TrinoException(NOT_SUPPORTED, "Key table does not support beginMerge");
+    } else {
+      return icebergMetadata.beginMerge(session, tableHandle, retryMode);
+    }
+  }
+
+  @Override
+  public void finishMerge(
+      ConnectorSession session,
+      ConnectorMergeTableHandle tableHandle,
+      Collection<Slice> fragments,
+      Collection<ComputedStatistics> computedStatistics) {
+    if (tableHandle instanceof KeyedTableHandle) {
+      throw new TrinoException(NOT_SUPPORTED, "Key table does not support finishMerge");
+    } else {
+      icebergMetadata.finishMerge(session, tableHandle, fragments, computedStatistics);
     }
   }
 

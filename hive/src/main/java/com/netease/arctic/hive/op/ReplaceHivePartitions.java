@@ -24,10 +24,10 @@ import com.netease.arctic.hive.exceptions.CannotAlterHiveLocationException;
 import com.netease.arctic.hive.table.UnkeyedHiveTable;
 import com.netease.arctic.hive.utils.HivePartitionUtil;
 import com.netease.arctic.hive.utils.HiveTableUtil;
+import com.netease.arctic.io.ArcticHadoopFileIO;
 import com.netease.arctic.op.UpdatePartitionProperties;
-import com.netease.arctic.utils.TableFileUtils;
+import com.netease.arctic.utils.TableFileUtil;
 import com.netease.arctic.utils.TablePropertyUtil;
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
@@ -35,12 +35,13 @@ import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.ReplacePartitions;
 import org.apache.iceberg.Snapshot;
-import org.apache.iceberg.StructLike;
 import org.apache.iceberg.Transaction;
+import org.apache.iceberg.io.FileInfo;
 import org.apache.iceberg.relocated.com.google.common.base.Joiner;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.util.StructLikeMap;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +49,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -68,8 +70,8 @@ public class ReplaceHivePartitions implements ReplacePartitions {
   private final String tableName;
   private final Table hiveTable;
 
-  private final Map<StructLike, Partition> rewritePartitions = Maps.newHashMap();
-  private final Map<StructLike, Partition> newPartitions = Maps.newHashMap();
+  private final StructLikeMap<Partition> rewritePartitions;
+  private final StructLikeMap<Partition> newPartitions;
   private String unpartitionTableLocation;
   private int commitTimestamp; // in seconds
 
@@ -92,6 +94,8 @@ public class ReplaceHivePartitions implements ReplacePartitions {
     } catch (TException | InterruptedException e) {
       throw new RuntimeException(e);
     }
+    this.rewritePartitions = StructLikeMap.create(table.spec().partitionType());
+    this.newPartitions = StructLikeMap.create(table.spec().partitionType());
   }
 
   @Override
@@ -113,6 +117,24 @@ public class ReplaceHivePartitions implements ReplacePartitions {
   }
 
   @Override
+  public ReplacePartitions validateFromSnapshot(long snapshotId) {
+    delegate.validateFromSnapshot(snapshotId);
+    return this;
+  }
+
+  @Override
+  public ReplacePartitions validateNoConflictingDeletes() {
+    delegate.validateNoConflictingDeletes();
+    return this;
+  }
+
+  @Override
+  public ReplacePartitions validateNoConflictingData() {
+    delegate.validateNoConflictingData();
+    return this;
+  }
+
+  @Override
   public ReplacePartitions set(String property, String value) {
     delegate.set(property, value);
     return this;
@@ -127,6 +149,12 @@ public class ReplaceHivePartitions implements ReplacePartitions {
   @Override
   public ReplacePartitions stageOnly() {
     delegate.stageOnly();
+    return this;
+  }
+
+  @Override
+  public ReplacePartitions scanManifestsWith(ExecutorService executorService) {
+    delegate.scanManifestsWith(executorService);
     return this;
   }
 
@@ -199,7 +227,7 @@ public class ReplaceHivePartitions implements ReplacePartitions {
     for (DataFile d : addFiles) {
       List<String> partitionValues = HivePartitionUtil.partitionValuesAsList(d.partition(), partitionSchema);
       String value = Joiner.on("/").join(partitionValues);
-      String location = TableFileUtils.getFileDir(d.path().toString());
+      String location = TableFileUtil.getFileDir(d.path().toString());
       partitionLocationMap.put(value, location);
       if (!partitionDataFileMap.containsKey(value)) {
         partitionDataFileMap.put(value, Lists.newArrayList());
@@ -231,24 +259,24 @@ public class ReplaceHivePartitions implements ReplacePartitions {
 
   /**
    * check files in the partition, and delete orphan files
-   * @param partitionLocation
-   * @param dataFiles
    */
   private void checkOrphanFilesAndDelete(String partitionLocation, List<DataFile> dataFiles) {
     List<String> filePathCollect = dataFiles.stream()
         .map(dataFile -> dataFile.path().toString()).collect(Collectors.toList());
-    List<FileStatus> exisitedFiles = table.io().list(partitionLocation);
-    for (FileStatus filePath: exisitedFiles) {
-      if (!filePathCollect.contains(filePath.getPath().toString())) {
-        table.io().deleteFile(String.valueOf(filePath.getPath().toString()));
-        LOG.warn("Delete orphan file path: {}", filePath.getPath().toString());
+
+    try (ArcticHadoopFileIO io = table.io()) {
+      for (FileInfo info : io.listPrefix(partitionLocation)) {
+        if (!filePathCollect.contains(info.location())) {
+          io.deleteFile(info.location());
+          LOG.warn("Delete orphan file path: {}", info.location());
+        }
       }
     }
   }
 
   private void commitUnPartitionedTable() {
     if (!addFiles.isEmpty()) {
-      final String newDataLocation = TableFileUtils.getFileDir(addFiles.get(0).path().toString());
+      final String newDataLocation = TableFileUtil.getFileDir(addFiles.get(0).path().toString());
       try {
         transactionalHMSClient.run(c -> {
           Table tbl = c.getTable(db, tableName);
@@ -289,7 +317,7 @@ public class ReplaceHivePartitions implements ReplacePartitions {
   private void checkDataFileInSameLocation(String partitionLocation, List<DataFile> files) {
     Path partitionPath = new Path(partitionLocation);
     for (DataFile df : files) {
-      String fileDir = TableFileUtils.getFileDir(df.path().toString());
+      String fileDir = TableFileUtil.getFileDir(df.path().toString());
       Path dirPath = new Path(fileDir);
       if (!partitionPath.equals(dirPath)) {
         throw new CannotAlterHiveLocationException(
@@ -301,6 +329,7 @@ public class ReplaceHivePartitions implements ReplacePartitions {
   }
 
   private void generateUnpartitionTableLocation() {
-    unpartitionTableLocation = TableFileUtils.getFileDir(this.addFiles.get(0).path().toString());
+    unpartitionTableLocation = TableFileUtil.getFileDir(this.addFiles.get(0).path().toString());
+    checkOrphanFilesAndDelete(unpartitionTableLocation, this.addFiles);
   }
 }

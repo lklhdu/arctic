@@ -63,7 +63,9 @@ public class TableEntriesScan {
   private final boolean allFileContent;
   private final boolean includeColumnStats;
   private final Set<FileContent> validFileContent;
+  private final MetadataTableType metadataTableType;
   private final Schema schema;
+  private final Long fromSequence;
 
   private Table entriesTable;
   private InclusiveMetricsEvaluator lazyMetricsEvaluator = null;
@@ -82,6 +84,8 @@ public class TableEntriesScan {
     private boolean includeColumnStats = false;
     private final Set<FileContent> fileContents = Sets.newHashSet();
     private Schema schema;
+    private MetadataTableType metadataTableType = MetadataTableType.ENTRIES;
+    private Long fromSequence;
 
     public Builder(Table table) {
       this.table = table;
@@ -142,19 +146,36 @@ public class TableEntriesScan {
       return this;
     }
 
+    /**
+     * Set the sequence number, fetch all entries greater than or equal to this sequence number.
+     * @param fromSequence nullable.
+     * @return this for chains
+     */
+    public Builder fromSequence(Long fromSequence) {
+      this.fromSequence = fromSequence;
+      return this;
+    }
+
     public Builder project(Schema schema) {
       this.schema = schema;
       return this;
     }
 
+    public Builder allEntries() {
+      this.metadataTableType = MetadataTableType.ALL_ENTRIES;
+      return this;
+    }
+
     public TableEntriesScan build() {
-      return new TableEntriesScan(table, snapshotId, dataFilter, aliveEntry, fileContents, includeColumnStats, schema);
+      return new TableEntriesScan(table, snapshotId, dataFilter, aliveEntry,
+          fileContents, includeColumnStats, schema, metadataTableType, fromSequence);
     }
   }
 
-
-  public TableEntriesScan(Table table, Long snapshotId, Expression dataFilter, boolean aliveEntry,
-                          Set<FileContent> validFileContent, boolean includeColumnStats, Schema schema) {
+  private TableEntriesScan(
+      Table table, Long snapshotId, Expression dataFilter, boolean aliveEntry,
+      Set<FileContent> validFileContent, boolean includeColumnStats,
+      Schema schema, MetadataTableType metadataTableType, Long fromSequence) {
     this.table = table;
     this.dataFilter = dataFilter;
     this.aliveEntry = aliveEntry;
@@ -162,11 +183,13 @@ public class TableEntriesScan {
     this.validFileContent = validFileContent;
     this.snapshotId = snapshotId;
     this.includeColumnStats = includeColumnStats;
-    this.schema  = schema;
+    this.schema = schema;
+    this.metadataTableType = metadataTableType;
+    this.fromSequence = fromSequence;
   }
 
   public CloseableIterable<IcebergFileEntry> entries() {
-    TableScan tableScan = getEntriesTable().newScan();
+    TableScan tableScan = getMetadataTable().newScan();
     if (snapshotId != null) {
       tableScan = tableScan.useSnapshot(snapshotId);
     }
@@ -179,22 +202,25 @@ public class TableEntriesScan {
 
     CloseableIterable<IcebergFileEntry> allEntries =
         CloseableIterable.transform(entries, (entry -> {
+          Long sequence = entry.get(entryFieldIndex(ManifestEntryFields.SEQUENCE_NUMBER.name()), Long.class);
+          if (fromSequence != null && fromSequence > sequence) {
+            return null;
+          }
           ManifestEntryFields.Status status =
               ManifestEntryFields.Status.of(
                   entry.get(entryFieldIndex(ManifestEntryFields.STATUS.name()), Integer.class));
-          long sequence = entry.get(entryFieldIndex(ManifestEntryFields.SEQUENCE_NUMBER.name()), Long.class);
-          Long snapshotId = entry.get(entryFieldIndex(ManifestEntryFields.SNAPSHOT_ID.name()), Long.class);
           StructLike fileRecord =
               entry.get(entryFieldIndex(ManifestEntryFields.DATA_FILE_FIELD_NAME), StructLike.class);
           FileContent fileContent =
               getFileContent(fileRecord.get(dataFileFieldIndex(DataFile.CONTENT.name()), Integer.class));
           if (shouldKeep(status, fileContent)) {
+            Long snapshotId = entry.get(entryFieldIndex(ManifestEntryFields.SNAPSHOT_ID.name()), Long.class);
             ContentFile<?> contentFile = buildContentFile(fileContent, fileRecord);
             if (metricsEvaluator().eval(contentFile)) {
               if (needMetrics() && !includeColumnStats) {
                 contentFile = (ContentFile<?>) contentFile.copyWithoutStats();
               }
-              return new IcebergFileEntry(snapshotId, sequence, contentFile);
+              return new IcebergFileEntry(snapshotId, sequence, status, contentFile);
             }
           }
           return null;
@@ -202,11 +228,11 @@ public class TableEntriesScan {
     return CloseableIterable.filter(allEntries, Objects::nonNull);
   }
 
-  private Table getEntriesTable() {
+  private Table getMetadataTable() {
     if (this.entriesTable == null) {
       this.entriesTable = MetadataTableUtils.createMetadataTableInstance(((HasTableOperations) table).operations(),
-          table.name(), table.name() + "#ENTRIES",
-          MetadataTableType.ENTRIES);
+          table.name(), table.name() + "#" + this.metadataTableType.name(),
+          this.metadataTableType);
     }
     return this.entriesTable;
   }
@@ -294,7 +320,8 @@ public class TableEntriesScan {
 
   @SuppressWarnings("unchecked")
   private Metrics buildMetrics(StructLike dataFile) {
-    return new Metrics(dataFile.get(dataFileFieldIndex(DataFile.RECORD_COUNT.name()), Long.class),
+    return new Metrics(
+        dataFile.get(dataFileFieldIndex(DataFile.RECORD_COUNT.name()), Long.class),
         (Map<Integer, Long>) dataFile.get(dataFileFieldIndex(DataFile.COLUMN_SIZES.name()), Map.class),
         (Map<Integer, Long>) dataFile.get(dataFileFieldIndex(DataFile.VALUE_COUNTS.name()), Map.class),
         (Map<Integer, Long>) dataFile.get(dataFileFieldIndex(DataFile.NULL_VALUE_COUNTS.name()), Map.class),
@@ -305,7 +332,7 @@ public class TableEntriesScan {
 
   private int entryFieldIndex(String fieldName) {
     if (lazyIndexOfEntryType == null) {
-      List<Types.NestedField> fields = getEntriesTable().schema().columns();
+      List<Types.NestedField> fields = getMetadataTable().schema().columns();
       Map<String, Integer> map = Maps.newHashMap();
       for (int i = 0; i < fields.size(); i++) {
         map.put(fields.get(i).name(), i);
@@ -318,7 +345,7 @@ public class TableEntriesScan {
   private int dataFileFieldIndex(String fieldName) {
     if (lazyIndexOfDataFileType == null) {
       List<Types.NestedField> fields =
-          getEntriesTable().schema().findType(ManifestEntryFields.DATA_FILE_FIELD_NAME).asStructType().fields();
+          getMetadataTable().schema().findType(ManifestEntryFields.DATA_FILE_FIELD_NAME).asStructType().fields();
       Map<String, Integer> map = Maps.newHashMap();
       for (int i = 0; i < fields.size(); i++) {
         map.put(fields.get(i).name(), i);
@@ -350,5 +377,4 @@ public class TableEntriesScan {
       return true;
     }
   }
-
 }

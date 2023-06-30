@@ -23,7 +23,7 @@ import com.netease.arctic.ams.api.TableMeta;
 import com.netease.arctic.ams.api.properties.MetaTableProperties;
 import com.netease.arctic.data.DataFileType;
 import com.netease.arctic.data.DataTreeNode;
-import com.netease.arctic.data.file.FileNameGenerator;
+import com.netease.arctic.data.FileNameRules;
 import com.netease.arctic.table.ArcticTable;
 import com.netease.arctic.table.PrimaryKeySpec;
 import com.netease.arctic.table.TableIdentifier;
@@ -34,6 +34,7 @@ import org.apache.iceberg.Schema;
 import org.apache.iceberg.StructLike;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 
 import java.util.HashMap;
@@ -76,23 +77,23 @@ public class ConvertStructUtil {
     FileContent content = dataFile.content();
     if (content == FileContent.DATA) {
       // if we can't parse file type from file name, handle it as base file
-      DataFileType dataFileType = FileNameGenerator.parseFileType(filePath, tableType);
+      DataFileType dataFileType = FileNameRules.parseFileType(filePath, tableType);
       validateArcticFileType(content, filePath, dataFileType);
       amsDataFile.setFileType(dataFileType.name());
 
-      DataTreeNode node = FileNameGenerator.parseFileNodeFromFileName(filePath);
+      DataTreeNode node = FileNameRules.parseFileNodeFromFileName(filePath);
       amsDataFile.setIndex(node.index());
       amsDataFile.setMask(node.mask());
     } else if (content == FileContent.POSITION_DELETES) {
       amsDataFile.setFileType(DataFileType.POS_DELETE_FILE.name());
 
-      DataFileType dataFileType = FileNameGenerator.parseFileType(filePath, tableType);
+      DataFileType dataFileType = FileNameRules.parseFileType(filePath, tableType);
       if (dataFileType == DataFileType.POS_DELETE_FILE) {
-        DataTreeNode node = FileNameGenerator.parseFileNodeFromFileName(filePath);
+        DataTreeNode node = FileNameRules.parseFileNodeFromFileName(filePath);
         amsDataFile.setIndex(node.index());
         amsDataFile.setMask(node.mask());
       } else {
-        if (!FileNameGenerator.isArcticFileFormat(filePath)) {
+        if (!FileNameRules.isArcticFileFormat(filePath)) {
           amsDataFile.setIndex(DataTreeNode.ROOT.getIndex());
           amsDataFile.setMask(DataTreeNode.ROOT.getMask());
         } else {
@@ -127,10 +128,27 @@ public class ConvertStructUtil {
     Class<?>[] javaClasses = partitionSpec.javaClasses();
     for (int i = 0; i < javaClasses.length; i += 1) {
       PartitionField field = partitionSpec.fields().get(i);
-      String valueString = field.transform().toHumanString(get(partitionData, i, javaClasses[i]));
+      Type type = partitionSpec.partitionType().fields().get(i).type();
+      String valueString = field.transform().toHumanString(type, get(partitionData, i, javaClasses[i]));
       partitionFields.add(new PartitionFieldData(field.name(), valueString));
     }
     return partitionFields;
+  }
+
+  public static String partitionToPath(List<PartitionFieldData> partitionFieldDataList) {
+    StringBuilder sb = new StringBuilder();
+    for (int i = 0; i < partitionFieldDataList.size(); i++) {
+      if (i > 0) {
+        sb.append("/");
+      }
+      sb.append(partitionFieldDataList.get(i).getName()).append("=")
+          .append(partitionFieldDataList.get(i).getValue());
+    }
+    return sb.toString();
+  }
+
+  public static String partitionToPath(PartitionSpec partitionSpec, StructLike partitionData) {
+    return partitionToPath(partitionFields(partitionSpec, partitionData));
   }
 
   @SuppressWarnings("unchecked")
@@ -148,7 +166,7 @@ public class ConvertStructUtil {
     Map<String, String> properties = new HashMap<>();
     Map<String, String> locations = new HashMap<>();
 
-    public TableMetaBuilder(TableIdentifier identifier, org.apache.iceberg.Schema schema) {
+    public TableMetaBuilder(TableIdentifier identifier, Schema schema) {
       meta.setTableIdentifier(identifier.buildTableIdentifier());
       this.schema = schema;
     }

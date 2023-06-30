@@ -19,15 +19,10 @@
 package com.netease.arctic.trino.arctic;
 
 import com.netease.arctic.data.ChangeAction;
-import com.netease.arctic.data.DefaultKeyedFile;
 import com.netease.arctic.io.writer.GenericBaseTaskWriter;
 import com.netease.arctic.io.writer.GenericChangeTaskWriter;
 import com.netease.arctic.io.writer.GenericTaskWriters;
 import com.netease.arctic.io.writer.SortedPosDeleteWriter;
-import java.io.IOException;
-import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.List;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DeleteFile;
@@ -36,6 +31,11 @@ import org.apache.iceberg.data.Record;
 import org.apache.iceberg.io.WriteResult;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
+
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
 
 public abstract class TableTestBaseWithInitDataForTrino extends TableTestBaseForTrino {
 
@@ -86,7 +86,7 @@ public abstract class TableTestBaseWithInitDataForTrino extends TableTestBaseFor
   protected DeleteFile deleteFileOfPositionDelete;
 
   protected void initData() throws IOException {
-    long currentSequenceNumber  = testKeyedTable.beginTransaction(null);
+    long currentSequenceNumber = testKeyedTable.beginTransaction(null);
     //write base
     {
       GenericBaseTaskWriter writer = GenericTaskWriters.builderFor(testKeyedTable)
@@ -123,7 +123,7 @@ public abstract class TableTestBaseWithInitDataForTrino extends TableTestBaseFor
       WriteResult result = writer.complete();
       AppendFiles changeAppend = testKeyedTable.changeTable().newAppend();
       Arrays.stream(result.dataFiles())
-              .forEach(changeAppend::appendFile);
+          .forEach(changeAppend::appendFile);
       changeAppend.commit();
     }
 

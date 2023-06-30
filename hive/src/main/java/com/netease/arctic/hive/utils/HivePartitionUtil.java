@@ -56,7 +56,7 @@ public class HivePartitionUtil {
     for (int i = 0; i < fields.size(); i++) {
       Type type = fields.get(i).type();
       Object value = partitionData.get(i, type.typeId().javaClass());
-      values.add(value.toString());
+      values.add(String.valueOf(value));
     }
     return values;
   }
@@ -136,7 +136,7 @@ public class HivePartitionUtil {
    * @param tableIdentifier A table identifier
    * @return A List of Hive partition objects
    */
-  public List<Partition> getHiveAllPartitions(HMSClientPool hiveClient, TableIdentifier tableIdentifier) {
+  public static List<Partition> getHiveAllPartitions(HMSClientPool hiveClient, TableIdentifier tableIdentifier) {
     try {
       return hiveClient.run(client ->
           client.listPartitions(tableIdentifier.getDatabase(), tableIdentifier.getTableName(), Short.MAX_VALUE));

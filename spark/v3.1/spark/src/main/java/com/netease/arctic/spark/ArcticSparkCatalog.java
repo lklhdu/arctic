@@ -58,6 +58,7 @@ import org.apache.spark.sql.connector.catalog.TableChange.SetProperty;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
+import scala.Option;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -66,6 +67,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -76,7 +78,6 @@ import static com.netease.arctic.spark.SparkSQLProperties.USE_TIMESTAMP_WITHOUT_
 import static org.apache.iceberg.spark.SparkSQLProperties.HANDLE_TIMESTAMP_WITHOUT_TIMEZONE;
 
 public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
-  // private static final Logger LOG = LoggerFactory.getLogger(ArcticSparkCatalog.class);
   private String catalogName = null;
 
   private ArcticCatalog catalog;
@@ -88,18 +89,15 @@ public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
    * @return an Arctic identifier
    */
   protected TableIdentifier buildIdentifier(Identifier identifier) {
-    if (identifier.namespace() == null || identifier.namespace().length == 0) {
-      throw new IllegalArgumentException(
-          "database is not specific, table identifier: " + identifier.name()
-      );
-    }
-
-    if (identifier.namespace().length > 1) {
-      throw new IllegalArgumentException(
-          "arctic does not support multi-level namespace: " +
-              Joiner.on(".").join(identifier.namespace()));
-    }
-
+    Preconditions.checkArgument(
+        identifier.namespace() != null && identifier.namespace().length > 0,
+        "database is not specific, table identifier: " + identifier.name()
+    );
+    Preconditions.checkArgument(
+        identifier.namespace() != null && identifier.namespace().length == 1,
+        "arctic does not support multi-level namespace: " +
+            Joiner.on(".").join(identifier.namespace())
+    );
     return TableIdentifier.of(
         catalog.name(),
         identifier.namespace()[0].split("\\.")[0],
@@ -107,17 +105,15 @@ public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
   }
 
   protected TableIdentifier buildInnerTableIdentifier(Identifier identifier) {
-    if (identifier.namespace() == null || identifier.namespace().length == 0) {
-      throw new IllegalArgumentException(
-          "database is not specific, table identifier: " + identifier.name()
-      );
-    }
-
-    if (identifier.namespace().length < 2) {
-      throw new IllegalArgumentException(
-          "arctic does not support multi-level namespace: " +
-              Joiner.on(".").join(identifier.namespace()));
-    }
+    Preconditions.checkArgument(
+        identifier.namespace() != null && identifier.namespace().length > 0,
+        "database is not specific, table identifier: " + identifier.name()
+    );
+    Preconditions.checkArgument(
+        identifier.namespace().length == 2,
+        "arctic does not support multi-level namespace: " +
+            Joiner.on(".").join(identifier.namespace())
+    );
 
     return TableIdentifier.of(
         catalog.name(),
@@ -148,17 +144,11 @@ public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
   }
 
   private Table loadInnerTable(ArcticTable table, ArcticTableStoreType type) {
-    if (type != null) {
-      switch (type) {
-        case CHANGE:
-          return new ArcticSparkChangeTable((BasicUnkeyedTable)table.asKeyedTable().changeTable(),
-              false);
-        default:
-          throw new IllegalArgumentException("Unknown inner table type: " + type);
-      }
-    } else {
-      throw new IllegalArgumentException("Table does not exist: " + table);
+    if (Objects.requireNonNull(type) == ArcticTableStoreType.CHANGE) {
+      return new ArcticSparkChangeTable((BasicUnkeyedTable) table.asKeyedTable().changeTable(),
+          false);
     }
+    throw new IllegalArgumentException("Unknown supported inner table store type: " + type);
   }
 
   private boolean isInnerTableIdentifier(Identifier identifier) {
@@ -198,7 +188,7 @@ public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
       ArcticTable table = builder.create();
       return ArcticSparkTable.ofArcticTable(table, catalog);
     } catch (AlreadyExistsException e) {
-      throw new TableAlreadyExistsException(ident);
+      throw new TableAlreadyExistsException("Table " + ident + " already exists", Option.apply(e));
     }
   }
 
@@ -235,15 +225,17 @@ public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
           .build();
       List<String> primaryKeys = primaryKeySpec.fieldNames();
       Set<String> pkSet = new HashSet<>(primaryKeys);
+      Set<Integer> identifierFieldIds = new HashSet<>();
       List<Types.NestedField> columnsWithPk = new ArrayList<>();
       convertSchema.columns().forEach(nestedField -> {
         if (pkSet.contains(nestedField.name())) {
           columnsWithPk.add(nestedField.asRequired());
+          identifierFieldIds.add(nestedField.fieldId());
         } else {
           columnsWithPk.add(nestedField);
         }
       });
-      return new Schema(columnsWithPk);
+      return new Schema(columnsWithPk, identifierFieldIds);
     }
     return convertSchema;
   }
@@ -371,11 +363,9 @@ public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
     if (!propertyChanges.isEmpty()) {
       Spark3Util.applyPropertyChanges(transaction.updateProperties(), propertyChanges).commit();
     }
-
     if (!schemaChanges.isEmpty()) {
       Spark3Util.applySchemaChanges(transaction.updateSchema(), schemaChanges).commit();
     }
-
     transaction.commitTransaction();
   }
 
@@ -406,7 +396,7 @@ public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
         .collect(Collectors.toList());
 
     return tableIdentifiers.stream()
-        .map(i -> Identifier.of(new String[] {i.getDatabase()}, i.getTableName()))
+        .map(i -> Identifier.of(new String[]{i.getDatabase()}, i.getTableName()))
         .toArray(Identifier[]::new);
   }
 
@@ -414,10 +404,10 @@ public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
   public final void initialize(String name, CaseInsensitiveStringMap options) {
     this.catalogName = name;
     String catalogUrl = options.get("url");
-    if (StringUtils.isBlank(catalogUrl)) {
-      throw new IllegalArgumentException("lack required properties: url");
-    }
-    catalog = CatalogLoader.load(catalogUrl, Maps.newHashMap());
+
+    Preconditions.checkArgument(StringUtils.isNotBlank(catalogUrl),
+        "lack required properties: url");
+    catalog = CatalogLoader.load(catalogUrl, options);
   }
 
   @Override
@@ -428,7 +418,7 @@ public class ArcticSparkCatalog implements TableCatalog, SupportsNamespaces {
   @Override
   public String[][] listNamespaces() {
     return catalog.listDatabases().stream()
-        .map(d -> new String[] {d})
+        .map(d -> new String[]{d})
         .toArray(String[][]::new);
   }
 

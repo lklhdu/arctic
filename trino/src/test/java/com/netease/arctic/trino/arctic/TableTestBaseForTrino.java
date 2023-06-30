@@ -24,10 +24,10 @@ import com.netease.arctic.ams.api.MockArcticMetastoreServer;
 import com.netease.arctic.catalog.ArcticCatalog;
 import com.netease.arctic.catalog.CatalogLoader;
 import com.netease.arctic.data.ChangeAction;
-import com.netease.arctic.iceberg.optimize.InternalRecordWrapper;
+import com.netease.arctic.iceberg.InternalRecordWrapper;
 import com.netease.arctic.io.reader.GenericArcticDataReader;
-import com.netease.arctic.io.writer.GenericChangeTaskWriter;
 import com.netease.arctic.io.writer.GenericBaseTaskWriter;
+import com.netease.arctic.io.writer.GenericChangeTaskWriter;
 import com.netease.arctic.io.writer.GenericTaskWriters;
 import com.netease.arctic.scan.CombinedScanTask;
 import com.netease.arctic.table.KeyedTable;
@@ -36,7 +36,6 @@ import com.netease.arctic.table.TableIdentifier;
 import com.netease.arctic.table.TableProperties;
 import com.netease.arctic.table.UnkeyedTable;
 import io.trino.testing.AbstractTestQueryFramework;
-import org.apache.commons.io.FileUtils;
 import org.apache.iceberg.AppendFiles;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.DataFiles;
@@ -52,6 +51,7 @@ import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.io.WriteResult;
 import org.apache.iceberg.types.Types;
+import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
 import java.io.IOException;
@@ -59,7 +59,6 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
-import org.junit.rules.TemporaryFolder;
 
 import static com.netease.arctic.ams.api.MockArcticMetastoreServer.TEST_CATALOG_NAME;
 import static com.netease.arctic.ams.api.MockArcticMetastoreServer.TEST_DB_NAME;
@@ -68,7 +67,7 @@ public abstract class TableTestBaseForTrino extends AbstractTestQueryFramework {
 
   protected static TemporaryFolder tmp = new TemporaryFolder();
 
-  protected static final MockArcticMetastoreServer AMS = MockArcticMetastoreServer.getInstance();
+  protected static MockArcticMetastoreServer AMS;
 
   protected static final TableIdentifier TABLE_ID =
       TableIdentifier.of(TEST_CATALOG_NAME, TEST_DB_NAME, "test_table");
@@ -142,6 +141,8 @@ public abstract class TableTestBaseForTrino extends AbstractTestQueryFramework {
 
     testCatalog.dropTable(PK_TABLE_ID, true);
     AMS.handler().getTableCommitMetas().remove(PK_TABLE_ID.buildTableIdentifier());
+    AMS.stopAndCleanUp();
+    AMS = null;
   }
 
   protected List<DataFile> writeBase(TableIdentifier identifier, List<Record> records) {
@@ -201,8 +202,8 @@ public abstract class TableTestBaseForTrino extends AbstractTestQueryFramework {
     );
     List<Record> result = Lists.newArrayList();
     try (CloseableIterable<CombinedScanTask> combinedScanTasks = keyedTable.newScan().planTasks()) {
-      combinedScanTasks.forEach( combinedTask -> combinedTask.tasks().forEach( scTask -> {
-        try( CloseableIterator<Record> records = reader.readData(scTask)) {
+      combinedScanTasks.forEach(combinedTask -> combinedTask.tasks().forEach(scTask -> {
+        try (CloseableIterator<Record> records = reader.readData(scTask)) {
           while (records.hasNext()) {
             result.add(records.next());
           }

@@ -20,6 +20,7 @@ package com.netease.arctic.trino;
 
 import com.netease.arctic.AmsClient;
 import com.netease.arctic.ams.api.CatalogMeta;
+import com.netease.arctic.ams.api.TableFormat;
 import com.netease.arctic.catalog.ArcticCatalog;
 import com.netease.arctic.catalog.BasicArcticCatalog;
 import com.netease.arctic.io.ArcticFileIO;
@@ -46,13 +47,13 @@ import org.apache.iceberg.ReplacePartitions;
 import org.apache.iceberg.ReplaceSortOrder;
 import org.apache.iceberg.RewriteFiles;
 import org.apache.iceberg.RewriteManifests;
-import org.apache.iceberg.Rollback;
 import org.apache.iceberg.RowDelta;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
+import org.apache.iceberg.SnapshotRef;
 import org.apache.iceberg.SortOrder;
+import org.apache.iceberg.StatisticsFile;
 import org.apache.iceberg.TableOperations;
-import org.apache.iceberg.TableScan;
 import org.apache.iceberg.Transaction;
 import org.apache.iceberg.UpdateLocation;
 import org.apache.iceberg.UpdatePartitionSpec;
@@ -156,6 +157,11 @@ public class ArcticCatalogSupportTableSuffix implements ArcticCatalog {
     return arcticCatalog.getTableBlockerManager(tableIdentifier);
   }
 
+  @Override
+  public Map<String, String> properties() {
+    return arcticCatalog.properties();
+  }
+
   public TableMetaStore getTableMetaStore() {
     return ((BasicArcticCatalog) arcticCatalog).getTableMetaStore();
   }
@@ -174,13 +180,13 @@ public class ArcticCatalogSupportTableSuffix implements ArcticCatalog {
     }
 
     @Override
-    public TableScan newScan() {
-      return table.newScan();
+    public TableIdentifier id() {
+      return table.id();
     }
 
     @Override
-    public TableIdentifier id() {
-      return table.id();
+    public TableFormat format() {
+      throw new UnsupportedOperationException();
     }
 
     @Override
@@ -314,11 +320,6 @@ public class ArcticCatalogSupportTableSuffix implements ArcticCatalog {
     }
 
     @Override
-    public Rollback rollback() {
-      return table.rollback();
-    }
-
-    @Override
     public ManageSnapshots manageSnapshots() {
       return table.manageSnapshots();
     }
@@ -344,6 +345,16 @@ public class ArcticCatalogSupportTableSuffix implements ArcticCatalog {
     }
 
     @Override
+    public List<StatisticsFile> statisticsFiles() {
+      return table.statisticsFiles();
+    }
+
+    @Override
+    public Map<String, SnapshotRef> refs() {
+      return table.refs();
+    }
+
+    @Override
     public TableOperations operations() {
       return table.operations();
     }
@@ -359,9 +370,9 @@ public class ArcticCatalogSupportTableSuffix implements ArcticCatalog {
     }
 
     @Override
-    public ChangeTableIncrementalScan newChangeScan() {
+    public ChangeTableIncrementalScan newScan() {
       if (table instanceof ChangeTable) {
-        return ((ChangeTable) table).newChangeScan();
+        return ((ChangeTable) table).newScan();
       } else {
         throw new UnsupportedOperationException();
       }

@@ -18,9 +18,12 @@
 
 package com.netease.arctic.spark.sql.execution
 
+import java.util
+
+import scala.collection.JavaConverters.asJavaIterableConverter
+
 import com.netease.arctic.op.OverwriteBaseFiles
 import com.netease.arctic.spark.table.{ArcticIcebergSparkTable, ArcticSparkTable}
-import com.netease.arctic.utils.TablePropertyUtil
 import org.apache.iceberg.spark.SparkFilters
 import org.apache.spark.sql.arctic.catalyst.ExpressionHelper
 import org.apache.spark.sql.catalyst.InternalRow
@@ -30,14 +33,10 @@ import org.apache.spark.sql.connector.catalog.Table
 import org.apache.spark.sql.execution.datasources.v2.V2CommandExec
 import org.apache.spark.sql.types._
 
-import java.util
-import scala.collection.JavaConverters.asJavaIterableConverter
-
 case class AlterArcticTableDropPartitionExec(
-  table: Table,
-  parts: Seq[PartitionSpec],
-  retainData: Boolean
-) extends V2CommandExec {
+    table: Table,
+    parts: Seq[PartitionSpec],
+    retainData: Boolean) extends V2CommandExec {
   override protected def run(): Seq[InternalRow] = {
     // build partitions
     val specs = parts.map {
@@ -74,7 +73,7 @@ case class AlterArcticTableDropPartitionExec(
     });
     // build filters
     val filters = splitConjunctivePredicates(deleteExpr).map {
-      filter =>
+      _ =>
         ExpressionHelper.translateFilter(deleteExpr).getOrElse(
           throw new UnsupportedOperationException("Cannot translate expression to source filter"))
     }.toArray
@@ -83,7 +82,8 @@ case class AlterArcticTableDropPartitionExec(
       case arctic: ArcticSparkTable =>
         if (arctic.table().isKeyedTable) {
           val txId = arctic.table().asKeyedTable().beginTransaction(null)
-          val overwriteBaseFiles: OverwriteBaseFiles = arctic.table().asKeyedTable().newOverwriteBaseFiles()
+          val overwriteBaseFiles: OverwriteBaseFiles =
+            arctic.table().asKeyedTable().newOverwriteBaseFiles()
           overwriteBaseFiles.overwriteByRowFilter(expression)
           overwriteBaseFiles.updateOptimizedSequenceDynamically(txId)
           overwriteBaseFiles.commit()

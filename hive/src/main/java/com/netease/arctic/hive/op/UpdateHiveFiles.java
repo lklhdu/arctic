@@ -6,11 +6,11 @@ import com.netease.arctic.hive.exceptions.CannotAlterHiveLocationException;
 import com.netease.arctic.hive.table.UnkeyedHiveTable;
 import com.netease.arctic.hive.utils.HivePartitionUtil;
 import com.netease.arctic.hive.utils.HiveTableUtil;
+import com.netease.arctic.io.ArcticHadoopFileIO;
 import com.netease.arctic.op.UpdatePartitionProperties;
-import com.netease.arctic.utils.TableFileUtils;
+import com.netease.arctic.utils.TableFileUtil;
 import com.netease.arctic.utils.TablePropertyUtil;
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.PartitionDropOptions;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
@@ -18,19 +18,21 @@ import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.iceberg.DataFile;
 import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.SnapshotUpdate;
 import org.apache.iceberg.StructLike;
 import org.apache.iceberg.Transaction;
 import org.apache.iceberg.expressions.Expression;
 import org.apache.iceberg.expressions.Expressions;
 import org.apache.iceberg.io.CloseableIterable;
+import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.relocated.com.google.common.base.Joiner;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.types.Types;
-import org.apache.iceberg.util.PropertyUtil;
+import org.apache.iceberg.util.StructLikeMap;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,7 +42,11 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
+import static com.netease.arctic.op.OverwriteBaseFiles.PROPERTIES_TRANSACTION_ID;
 
 public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements SnapshotUpdate<T> {
 
@@ -54,6 +60,7 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
   protected final UnkeyedHiveTable table;
   protected final HMSClientPool hmsClient;
   protected final HMSClientPool transactionClient;
+  protected final T delegate;
   protected final String db;
   protected final String tableName;
 
@@ -63,20 +70,24 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
   protected final List<DataFile> addFiles = Lists.newArrayList();
   protected final List<DataFile> deleteFiles = Lists.newArrayList();
 
-  protected Map<StructLike, Partition> partitionToDelete = Maps.newHashMap();
-  protected Map<StructLike, Partition> partitionToCreate = Maps.newHashMap();
-  protected final Map<StructLike, Partition> partitionToAlter = Maps.newHashMap();
+  protected StructLikeMap<Partition> partitionToDelete;
+  protected StructLikeMap<Partition> partitionToCreate;
+  protected final StructLikeMap<Partition> partitionToAlter;
+  protected final StructLikeMap<Partition> partitionToAlterLocation;
   protected String unpartitionTableLocation;
   protected Long txId = null;
   protected boolean validateLocation = true;
   protected boolean checkOrphanFiles = false;
   protected int commitTimestamp; // in seconds
 
-  public UpdateHiveFiles(Transaction transaction, boolean insideTransaction, UnkeyedHiveTable table,
-                         HMSClientPool hmsClient, HMSClientPool transactionClient) {
+  public UpdateHiveFiles(
+      Transaction transaction, boolean insideTransaction,
+      UnkeyedHiveTable table, T delegate,
+      HMSClientPool hmsClient, HMSClientPool transactionClient) {
     this.transaction = transaction;
     this.insideTransaction = insideTransaction;
     this.table = table;
+    this.delegate = delegate;
     this.hmsClient = hmsClient;
     this.transactionClient = transactionClient;
 
@@ -87,9 +98,11 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     } catch (TException | InterruptedException e) {
       throw new RuntimeException(e);
     }
+    this.partitionToAlter = StructLikeMap.create(table.spec().partitionType());
+    this.partitionToCreate = StructLikeMap.create(table.spec().partitionType());
+    this.partitionToDelete = StructLikeMap.create(table.spec().partitionType());
+    this.partitionToAlterLocation = StructLikeMap.create(table.spec().partitionType());
   }
-
-  abstract SnapshotUpdate<?> getSnapshotUpdateDelegate();
 
   @Override
   public void commit() {
@@ -102,13 +115,13 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     }
 
     if (checkOrphanFiles) {
-      checkOrphanFilesAndDelete();
+      checkPartitionedOrphanFilesAndDelete(table.spec().isUnpartitioned());
     }
     // if no DataFiles to add or delete in Hive location, only commit to iceberg
     boolean noHiveDataFilesChanged = CollectionUtils.isEmpty(addFiles) && CollectionUtils.isEmpty(deleteFiles) &&
         expr != Expressions.alwaysTrue();
 
-    getSnapshotUpdateDelegate().commit();
+    delegate.commit();
     if (!noHiveDataFilesChanged) {
       commitPartitionProperties();
     }
@@ -160,9 +173,9 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     updatePartitionProperties.commit();
   }
 
-  protected Map<StructLike, Partition> getCreatePartition(Map<StructLike, Partition> partitionToDelete) {
+  protected StructLikeMap<Partition> getCreatePartition(StructLikeMap<Partition> partitionToDelete) {
     if (this.addFiles.isEmpty()) {
-      return Maps.newHashMap();
+      return StructLikeMap.create(table.spec().partitionType());
     }
 
     Map<String, String> partitionLocationMap = Maps.newHashMap();
@@ -173,7 +186,7 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     for (DataFile d : addFiles) {
       List<String> partitionValues = HivePartitionUtil.partitionValuesAsList(d.partition(), partitionSchema);
       String value = Joiner.on("/").join(partitionValues);
-      String location = TableFileUtils.getFileDir(d.path().toString());
+      String location = TableFileUtil.getFileDir(d.path().toString());
       partitionLocationMap.put(value, location);
       if (!partitionDataFileMap.containsKey(value)) {
         partitionDataFileMap.put(value, Lists.newArrayList());
@@ -182,7 +195,7 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
       partitionValueMap.put(value, partitionValues);
     }
 
-    Map<StructLike, Partition> createPartitions = Maps.newHashMap();
+    StructLikeMap<Partition> createPartitions = StructLikeMap.create(table.spec().partitionType());
     for (String val : partitionValueMap.keySet()) {
       List<String> values = partitionValueMap.get(val);
       String location = partitionLocationMap.get(val);
@@ -197,13 +210,13 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     return createPartitions;
   }
 
-  protected Map<StructLike, Partition> getDeletePartition() {
+  protected StructLikeMap<Partition> getDeletePartition() {
     if (expr != null) {
       List<DataFile> deleteFilesByExpr = applyDeleteExpr();
       this.deleteFiles.addAll(deleteFilesByExpr);
     }
 
-    Map<StructLike, Partition> deletePartitions = Maps.newHashMap();
+    StructLikeMap<Partition> deletePartitions = StructLikeMap.create(table.spec().partitionType());
     if (deleteFiles.isEmpty()) {
       return deletePartitions;
     }
@@ -211,12 +224,12 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     Types.StructType partitionSchema = table.spec().partitionType();
 
     Set<String> checkedPartitionValues = Sets.newHashSet();
-    Set<Path> deleteFileLocations = Sets.newHashSet();
+    Set<String> deleteFileLocations = Sets.newHashSet();
 
     for (DataFile dataFile : deleteFiles) {
       List<String> values = HivePartitionUtil.partitionValuesAsList(dataFile.partition(), partitionSchema);
       String pathValue = Joiner.on("/").join(values);
-      deleteFileLocations.add(new Path(dataFile.path().toString()));
+      deleteFileLocations.add(dataFile.path().toString());
       if (checkedPartitionValues.contains(pathValue)) {
         continue;
       }
@@ -237,16 +250,19 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     return deletePartitions;
   }
 
-  private void checkPartitionDelete(Set<Path> deleteFiles, Partition partition) {
+  private void checkPartitionDelete(Set<String> deleteFiles, Partition partition) {
     String partitionLocation = partition.getSd().getLocation();
-    List<FileStatus> files = table.io().list(partitionLocation);
-    for (FileStatus f : files) {
-      Path filePath = f.getPath();
-      if (!deleteFiles.contains(filePath)) {
-        throw new CannotAlterHiveLocationException(
-            "can't delete hive partition: " + partitionToString(partition) + ", file under partition is not deleted: " +
-                filePath.toString());
-      }
+
+    try (ArcticHadoopFileIO io = table.io()) {
+      io.listDirectory(partitionLocation)
+          .forEach(f -> {
+            if (!deleteFiles.contains(f.location())) {
+              throw new CannotAlterHiveLocationException(
+                  "can't delete hive partition: " + partitionToString(partition) +
+                      ", file under partition is not deleted: " +
+                      f.location());
+            }
+          });
     }
   }
 
@@ -256,7 +272,7 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
   private void checkCreatePartitionDataFiles(List<DataFile> addFiles, String partitionLocation) {
     Path partitionPath = new Path(partitionLocation);
     for (DataFile df : addFiles) {
-      String fileDir = TableFileUtils.getFileDir(df.path().toString());
+      String fileDir = TableFileUtil.getFileDir(df.path().toString());
       Path dirPath = new Path(fileDir);
       if (!partitionPath.equals(dirPath)) {
         throw new CannotAlterHiveLocationException(
@@ -270,21 +286,30 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
   /**
    * check files in the partition, and delete orphan files
    */
-  private void checkOrphanFilesAndDelete() {
-    List<String> partitionsToCheck = this.partitionToCreate.values()
-        .stream().map(partition -> partition.getSd().getLocation()).collect(Collectors.toList());
-    for (String partitionLocation: partitionsToCheck) {
-      List<String> addFilesPathCollect = addFiles.stream()
-          .map(dataFile -> dataFile.path().toString()).collect(Collectors.toList());
-      List<String> deleteFilesPathCollect = deleteFiles.stream()
-          .map(deleteFile -> deleteFile.path().toString()).collect(Collectors.toList());
-      List<FileStatus> exisitedFiles = table.io().list(partitionLocation);
-      for (FileStatus filePath: exisitedFiles) {
-        if (!addFilesPathCollect.contains(filePath.getPath().toString()) &&
-            !deleteFilesPathCollect.contains(filePath.getPath().toString())) {
-          table.io().deleteFile(String.valueOf(filePath.getPath().toString()));
-          LOG.warn("Delete orphan file path: {}", filePath.getPath().toString());
-        }
+  private void checkPartitionedOrphanFilesAndDelete(boolean isUnPartitioned) {
+    List<String> partitionsToCheck = Lists.newArrayList();
+    if (isUnPartitioned) {
+      partitionsToCheck.add(this.unpartitionTableLocation);
+    } else {
+      partitionsToCheck.addAll(this.partitionToCreate.values()
+          .stream().map(partition -> partition.getSd().getLocation()).collect(Collectors.toList()));
+      partitionsToCheck.addAll(this.partitionToAlterLocation.values()
+          .stream().map(partition -> partition.getSd().getLocation()).collect(Collectors.toList()));
+    }
+    Set<String> addFilesPathCollect = addFiles.stream()
+        .map(dataFile -> dataFile.path().toString()).collect(Collectors.toSet());
+    Set<String> deleteFilesPathCollect = deleteFiles.stream()
+        .map(deleteFile -> deleteFile.path().toString()).collect(Collectors.toSet());
+
+    for (String partitionLocation : partitionsToCheck) {
+      try (ArcticHadoopFileIO io = table.io()) {
+        io.listPrefix(partitionLocation).forEach(f -> {
+          if (!addFilesPathCollect.contains(f.location()) &&
+              !deleteFilesPathCollect.contains(f.location())) {
+            io.deleteFile(f.location());
+            LOG.warn("Delete orphan file path: {}", f.location());
+          }
+        });
       }
     }
   }
@@ -297,10 +322,10 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
    * 1. exists but location is same. skip
    * 2. exists but location is not same, throw {@link CannotAlterHiveLocationException}
    */
-  private Map<StructLike, Partition> filterNewPartitionNonExists(
-      Map<StructLike, Partition> partitionToCreate,
-      Map<StructLike, Partition> partitionToDelete) {
-    Map<StructLike, Partition> partitions = Maps.newHashMap();
+  private StructLikeMap<Partition> filterNewPartitionNonExists(
+      StructLikeMap<Partition> partitionToCreate,
+      StructLikeMap<Partition> partitionToDelete) {
+    StructLikeMap<Partition> partitions = StructLikeMap.create(table.spec().partitionType());
     Map<String, Partition> deletePartitionValueMap = Maps.newHashMap();
     for (Partition p : partitionToDelete.values()) {
       String partValue = Joiner.on("/").join(p.getValues());
@@ -323,6 +348,7 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
         } else {
           // this partition is need to alter, rather than delete
           partitionToAlter.put(entry.getKey(), entry.getValue());
+          partitionToAlterLocation.put(entry.getKey(), entry.getValue());
           partitionToDelete.remove(entry.getKey());
           continue;
         }
@@ -378,12 +404,12 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
 
     if (!partitionToAlter.isEmpty()) {
       try {
-        transactionClient.run(c ->  {
+        transactionClient.run(c -> {
           try {
             c.alterPartitions(db, tableName, Lists.newArrayList(partitionToAlter.values()), null);
           } catch (InvocationTargetException | InstantiationException |
-              IllegalAccessException | NoSuchMethodException |
-              ClassNotFoundException e) {
+                   IllegalAccessException | NoSuchMethodException |
+                   ClassNotFoundException e) {
             throw new RuntimeException(e);
           }
           return null;
@@ -398,7 +424,7 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     if (this.addFiles.isEmpty()) {
       unpartitionTableLocation = createUnpartitionEmptyLocationForHive();
     } else {
-      unpartitionTableLocation = TableFileUtils.getFileDir(this.addFiles.get(0).path().toString());
+      unpartitionTableLocation = TableFileUtil.getFileDir(this.addFiles.get(0).path().toString());
     }
   }
 
@@ -424,11 +450,13 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     String newLocation;
     newLocation = HiveTableUtil.newHiveDataLocation(table.hiveLocation(), table.spec(), null,
         txId != null ? HiveTableUtil.newHiveSubdirectory(txId) : HiveTableUtil.newHiveSubdirectory());
-    OutputFile file = table.io().newOutputFile(newLocation + "/.keep");
-    try {
-      file.createOrOverwrite().close();
-    } catch (IOException e) {
-      throw new RuntimeException(e);
+    try (FileIO io = table.io()) {
+      OutputFile file = io.newOutputFile(newLocation + "/.keep");
+      try {
+        file.createOrOverwrite().close();
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
     }
     return newLocation;
   }
@@ -451,4 +479,52 @@ public abstract class UpdateHiveFiles<T extends SnapshotUpdate<T>> implements Sn
     return "Partition(values: [" + Joiner.on("/").join(p.getValues()) +
         "], location: " + p.getSd().getLocation() + ")";
   }
+
+  @Override
+  public T scanManifestsWith(ExecutorService executorService) {
+    delegate.scanManifestsWith(executorService);
+    return self();
+  }
+
+  @Override
+  public T set(String property, String value) {
+    if (PROPERTIES_TRANSACTION_ID.equals(property)) {
+      this.txId = Long.parseLong(value);
+    }
+
+    if (PROPERTIES_VALIDATE_LOCATION.equals(property)) {
+      this.validateLocation = Boolean.parseBoolean(value);
+    }
+
+    if (DELETE_UNTRACKED_HIVE_FILE.equals(property)) {
+      this.checkOrphanFiles = Boolean.parseBoolean(value);
+    }
+
+    delegate.set(property, value);
+    return self();
+  }
+
+  @Override
+  public T deleteWith(Consumer<String> deleteFunc) {
+    delegate.deleteWith(deleteFunc);
+    return self();
+  }
+
+  @Override
+  public T stageOnly() {
+    delegate.stageOnly();
+    return self();
+  }
+
+  @Override
+  public Snapshot apply() {
+    return delegate.apply();
+  }
+
+  @Override
+  public Object updateEvent() {
+    return delegate.updateEvent();
+  }
+
+  protected abstract T self();
 }

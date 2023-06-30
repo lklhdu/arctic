@@ -27,7 +27,6 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
 
-
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -41,7 +40,6 @@ public class ArcticCommandAstParser extends ArcticSqlCommandBaseVisitor<Object>
 
   @Override
   public LogicalPlan visitMigrateStatement(ArcticSqlCommandParser.MigrateStatementContext ctx) {
-    // return super.visitMigrateStatement(ctx);
     Seq<String> source = multipartIdentifier(ctx.source);
     Seq<String> target = multipartIdentifier(ctx.target);
     return new MigrateToArcticStatement(
@@ -50,7 +48,8 @@ public class ArcticCommandAstParser extends ArcticSqlCommandBaseVisitor<Object>
   }
 
   private Seq<String> multipartIdentifier(ArcticSqlCommandParser.MultipartIdentifierContext ctx) {
-    List<String> identifier = ctx.parts.stream().map(RuleContext::getText).collect(Collectors.toList());
+    List<String> identifier = ctx.parts.stream().map(RuleContext::getText)
+        .map(String::trim).collect(Collectors.toList());
     return JavaConverters.asScalaBuffer(identifier);
   }
 }

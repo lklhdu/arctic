@@ -23,29 +23,28 @@ import com.google.inject.Module;
 import com.google.inject.Scopes;
 import com.google.inject.multibindings.Multibinder;
 import com.netease.arctic.trino.ArcticCatalogFactory;
+import com.netease.arctic.trino.ArcticConfig;
+import com.netease.arctic.trino.ArcticConnectorSplitManager;
 import com.netease.arctic.trino.ArcticHdfsAuthentication;
 import com.netease.arctic.trino.ArcticHdfsConfiguration;
-import com.netease.arctic.trino.ArcticConnectorSplitManager;
 import com.netease.arctic.trino.ArcticMetadataFactory;
 import com.netease.arctic.trino.ArcticPageSourceProvider;
-import com.netease.arctic.trino.ArcticTransactionManager;
-import com.netease.arctic.trino.ArcticConfig;
-import com.netease.arctic.trino.keyed.KeyedConnectorSplitManager;
 import com.netease.arctic.trino.ArcticSessionProperties;
+import com.netease.arctic.trino.ArcticTransactionManager;
+import com.netease.arctic.trino.keyed.KeyedConnectorSplitManager;
 import com.netease.arctic.trino.keyed.KeyedPageSourceProvider;
 import com.netease.arctic.trino.unkeyed.ArcticTrinoCatalogFactory;
 import com.netease.arctic.trino.unkeyed.IcebergPageSourceProvider;
 import com.netease.arctic.trino.unkeyed.IcebergSplitManager;
 import io.airlift.configuration.ConfigBinder;
+import io.trino.hdfs.HdfsConfig;
+import io.trino.hdfs.HdfsConfiguration;
+import io.trino.hdfs.HdfsEnvironment;
+import io.trino.hdfs.authentication.HdfsAuthentication;
 import io.trino.plugin.base.session.SessionPropertiesProvider;
 import io.trino.plugin.hive.FileFormatDataSourceStats;
-import io.trino.plugin.hive.HdfsConfig;
-import io.trino.plugin.hive.HdfsConfiguration;
-import io.trino.plugin.hive.HdfsEnvironment;
-import io.trino.plugin.hive.HiveConfig;
 import io.trino.plugin.hive.NamenodeStats;
-import io.trino.plugin.hive.authentication.HdfsAuthentication;
-import io.trino.plugin.hive.metastore.MetastoreConfig;
+import io.trino.plugin.hive.metastore.HiveMetastoreConfig;
 import io.trino.plugin.hive.orc.OrcReaderConfig;
 import io.trino.plugin.hive.orc.OrcWriterConfig;
 import io.trino.plugin.hive.parquet.ParquetReaderConfig;
@@ -58,10 +57,11 @@ import io.trino.plugin.iceberg.IcebergPageSinkProvider;
 import io.trino.plugin.iceberg.IcebergSessionProperties;
 import io.trino.plugin.iceberg.IcebergTableProperties;
 import io.trino.plugin.iceberg.RollbackToSnapshotProcedure;
+import io.trino.plugin.iceberg.TableStatisticsWriter;
 import io.trino.plugin.iceberg.catalog.TrinoCatalogFactory;
-import io.trino.plugin.iceberg.procedure.DeleteOrphanFilesTableProcedure;
 import io.trino.plugin.iceberg.procedure.ExpireSnapshotsTableProcedure;
 import io.trino.plugin.iceberg.procedure.OptimizeTableProcedure;
+import io.trino.plugin.iceberg.procedure.RemoveOrphanFilesTableProcedure;
 import io.trino.spi.connector.ConnectorNodePartitioningProvider;
 import io.trino.spi.connector.ConnectorPageSinkProvider;
 import io.trino.spi.connector.ConnectorPageSourceProvider;
@@ -78,65 +78,65 @@ import static org.weakref.jmx.guice.ExportBinder.newExporter;
 public class TestUnionModule implements Module {
 
 
-    @Override
-    public void configure(Binder binder)
-    {
-        //base
-        configBinder(binder).bindConfig(ArcticConfig.class);
-        binder.bind(ArcticSessionProperties.class).in(Scopes.SINGLETON);
-        binder.bind(KeyedConnectorSplitManager.class).in(Scopes.SINGLETON);
-        binder.bind(KeyedPageSourceProvider.class).in(Scopes.SINGLETON);
-        binder.bind(ArcticCatalogFactory.class).to(TestArcticCatalogFactory.class).in(Scopes.SINGLETON);
-        binder.bind(TrinoCatalogFactory.class).to(ArcticTrinoCatalogFactory.class).in(Scopes.SINGLETON);
-        binder.bind(ArcticTransactionManager.class).in(Scopes.SINGLETON);
-        binder.bind(ArcticMetadataFactory.class).in(Scopes.SINGLETON);
-        binder.bind(ConnectorSplitManager.class).to(ArcticConnectorSplitManager.class).in(Scopes.SINGLETON);
-        binder.bind(ConnectorPageSourceProvider.class).to(ArcticPageSourceProvider.class).in(Scopes.SINGLETON);
+  @Override
+  public void configure(Binder binder) {
+      //base
+      configBinder(binder).bindConfig(ArcticConfig.class);
+      binder.bind(IcebergSessionProperties.class).in(Scopes.SINGLETON);
+      binder.bind(KeyedConnectorSplitManager.class).in(Scopes.SINGLETON);
+      binder.bind(KeyedPageSourceProvider.class).in(Scopes.SINGLETON);
+      binder.bind(ArcticCatalogFactory.class).to(TestArcticCatalogFactory.class).in(Scopes.SINGLETON);
+      binder.bind(TrinoCatalogFactory.class).to(ArcticTrinoCatalogFactory.class).in(Scopes.SINGLETON);
+      binder.bind(ArcticTransactionManager.class).in(Scopes.SINGLETON);
+      binder.bind(ArcticMetadataFactory.class).in(Scopes.SINGLETON);
+      binder.bind(TableStatisticsWriter.class).in(Scopes.SINGLETON);
+      binder.bind(ConnectorSplitManager.class).to(ArcticConnectorSplitManager.class).in(Scopes.SINGLETON);
+      binder.bind(ConnectorPageSourceProvider.class).to(ArcticPageSourceProvider.class).in(Scopes.SINGLETON);
 
-        //############# IcebergModule
-        configBinder(binder).bindConfig(MetastoreConfig.class);
-        configBinder(binder).bindConfig(IcebergConfig.class);
+      //############# IcebergModule
+      configBinder(binder).bindConfig(HiveMetastoreConfig.class);
+      configBinder(binder).bindConfig(IcebergConfig.class);
 
-        newSetBinder(binder, SessionPropertiesProvider.class).addBinding().to(IcebergSessionProperties.class).in(Scopes.SINGLETON);
-        binder.bind(IcebergTableProperties.class).in(Scopes.SINGLETON);
+      newSetBinder(binder, SessionPropertiesProvider.class).addBinding().to(IcebergSessionProperties.class).in(Scopes.SINGLETON);
+      binder.bind(IcebergTableProperties.class).in(Scopes.SINGLETON);
 
-        binder.bind(IcebergSplitManager.class).in(Scopes.SINGLETON);
-        binder.bind(IcebergPageSourceProvider.class).in(Scopes.SINGLETON);
+      binder.bind(IcebergSplitManager.class).in(Scopes.SINGLETON);
+      binder.bind(IcebergPageSourceProvider.class).in(Scopes.SINGLETON);
 
-        binder.bind(ConnectorPageSinkProvider.class)
-                .to(IcebergPageSinkProvider.class).in(Scopes.SINGLETON);
+      binder.bind(ConnectorPageSinkProvider.class)
+          .to(IcebergPageSinkProvider.class).in(Scopes.SINGLETON);
 
-        binder.bind(ConnectorNodePartitioningProvider.class)
-                .to(IcebergNodePartitioningProvider.class).in(Scopes.SINGLETON);
+      binder.bind(ConnectorNodePartitioningProvider.class)
+          .to(IcebergNodePartitioningProvider.class).in(Scopes.SINGLETON);
 
-        configBinder(binder).bindConfig(OrcReaderConfig.class);
-        configBinder(binder).bindConfig(OrcWriterConfig.class);
+      configBinder(binder).bindConfig(OrcReaderConfig.class);
+      configBinder(binder).bindConfig(OrcWriterConfig.class);
 
-        configBinder(binder).bindConfig(ParquetReaderConfig.class);
-        configBinder(binder).bindConfig(ParquetWriterConfig.class);
+      configBinder(binder).bindConfig(ParquetReaderConfig.class);
+      configBinder(binder).bindConfig(ParquetWriterConfig.class);
 
-        jsonCodecBinder(binder).bindJsonCodec(CommitTaskData.class);
+      jsonCodecBinder(binder).bindJsonCodec(CommitTaskData.class);
 
-        binder.bind(FileFormatDataSourceStats.class).in(Scopes.SINGLETON);
-        newExporter(binder).export(FileFormatDataSourceStats.class).withGeneratedName();
+      binder.bind(FileFormatDataSourceStats.class).in(Scopes.SINGLETON);
+      newExporter(binder).export(FileFormatDataSourceStats.class).withGeneratedName();
 
-        binder.bind(IcebergFileWriterFactory.class).in(Scopes.SINGLETON);
-        newExporter(binder).export(IcebergFileWriterFactory.class).withGeneratedName();
+      binder.bind(IcebergFileWriterFactory.class).in(Scopes.SINGLETON);
+      newExporter(binder).export(IcebergFileWriterFactory.class).withGeneratedName();
 
-        Multibinder<Procedure> procedures = newSetBinder(binder, Procedure.class);
-        procedures.addBinding().toProvider(RollbackToSnapshotProcedure.class).in(Scopes.SINGLETON);
+      Multibinder<Procedure> procedures = newSetBinder(binder, Procedure.class);
+      procedures.addBinding().toProvider(RollbackToSnapshotProcedure.class).in(Scopes.SINGLETON);
 
-        Multibinder<TableProcedureMetadata> tableProcedures = newSetBinder(binder, TableProcedureMetadata.class);
-        tableProcedures.addBinding().toProvider(OptimizeTableProcedure.class).in(Scopes.SINGLETON);
-        tableProcedures.addBinding().toProvider(ExpireSnapshotsTableProcedure.class).in(Scopes.SINGLETON);
-        tableProcedures.addBinding().toProvider(DeleteOrphanFilesTableProcedure.class).in(Scopes.SINGLETON);
+      Multibinder<TableProcedureMetadata> tableProcedures = newSetBinder(binder, TableProcedureMetadata.class);
+      tableProcedures.addBinding().toProvider(OptimizeTableProcedure.class).in(Scopes.SINGLETON);
+      tableProcedures.addBinding().toProvider(ExpireSnapshotsTableProcedure.class).in(Scopes.SINGLETON);
+      tableProcedures.addBinding().toProvider(RemoveOrphanFilesTableProcedure.class).in(Scopes.SINGLETON);
 
-        //hdfs
-        ConfigBinder.configBinder(binder).bindConfig(HdfsConfig.class);
-        binder.bind(HdfsConfiguration.class).to(ArcticHdfsConfiguration.class).in(Scopes.SINGLETON);
-        binder.bind(HdfsAuthentication.class).to(ArcticHdfsAuthentication.class).in(Scopes.SINGLETON);
-        binder.bind(HdfsEnvironment.class).in(Scopes.SINGLETON);
-        binder.bind(NamenodeStats.class).in(Scopes.SINGLETON);
-        ExportBinder.newExporter(binder).export(NamenodeStats.class).withGeneratedName();
-    }
+      //hdfs
+      ConfigBinder.configBinder(binder).bindConfig(HdfsConfig.class);
+      binder.bind(HdfsConfiguration.class).to(ArcticHdfsConfiguration.class).in(Scopes.SINGLETON);
+      binder.bind(HdfsAuthentication.class).to(ArcticHdfsAuthentication.class).in(Scopes.SINGLETON);
+      binder.bind(HdfsEnvironment.class).in(Scopes.SINGLETON);
+      binder.bind(NamenodeStats.class).in(Scopes.SINGLETON);
+      ExportBinder.newExporter(binder).export(NamenodeStats.class).withGeneratedName();
+  }
 }

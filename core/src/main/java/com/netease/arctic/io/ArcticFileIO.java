@@ -18,10 +18,9 @@
 
 package com.netease.arctic.io;
 
-import org.apache.hadoop.fs.FileStatus;
 import org.apache.iceberg.io.FileIO;
-
-import java.util.List;
+import org.apache.iceberg.io.InputFile;
+import org.apache.iceberg.io.SupportsPrefixOperations;
 import java.util.concurrent.Callable;
 
 /**
@@ -33,7 +32,7 @@ public interface ArcticFileIO extends FileIO {
    * Run the given action with login user.
    *
    * @param callable the method to execute
-   * @param <T> the return type of the run method
+   * @param <T>      the return type of the run method
    * @return the value from the run method
    */
   <T> T doAs(Callable<T> callable);
@@ -44,49 +43,60 @@ public interface ArcticFileIO extends FileIO {
    * @param path source pathmkdir
    * @return true if the path exists;
    */
-  boolean exists(String path);
+  default boolean exists(String path) {
+    InputFile inputFile = newInputFile(path);
+    return inputFile.exists();
+  }
 
   /**
-   * Create a new directory.
-   *
-   * @param path source path
+   * Returns true if this tableIo is an {@link SupportsPrefixOperations}
    */
-  void mkdirs(String path);
+  default boolean supportPrefixOperations() {
+    return false;
+  }
 
   /**
-   * Rename file from old path to new path
-   *
-   * @param oldpath source path
-   * @param newPath target path
+   * Return this cast to {@link SupportsPrefixOperations} if it is.
    */
-  void rename(String oldpath, String newPath);
-
-  /** Delete a file.
-   *
-   * @param path the path to delete.
-   * @param recursive if path is a directory and set to
-   * true, the directory is deleted else throws an exception. In
-   * case of a file the recursive can be set to either true or false.
-   * @return  true if delete is successful else false.
-   */
-  boolean deleteFileWithResult(String path, boolean recursive);
-
-  //TODO FileStatus is a hadoop object, need to be replaced
-  List<FileStatus> list(String location);
+  default SupportsPrefixOperations asPrefixFileIO() {
+    if (supportPrefixOperations()) {
+      return (SupportsPrefixOperations) this;
+    } else {
+      throw new IllegalStateException("Doesn't support prefix operations");
+    }
+  }
 
   /**
-   * Check if a location is a directory.
-   *
-   * @param location source location
-   * @return true if the location is a directory
+   * Returns true if this tableIo is an {@link SupportsFileSystemOperations}
    */
-  boolean isDirectory(String location);
+  default boolean supportFileSystemOperations() {
+    return false;
+  }
 
   /**
-   * Check if a location is an empty directory.
-   *
-   * @param location source location
-   * @return true if the location is an empty directory
+   * Return this cast to {@link SupportsFileSystemOperations} if it is.
    */
-  boolean isEmptyDirectory(String location);
+  default SupportsFileSystemOperations asFileSystemIO() {
+    if (supportFileSystemOperations()) {
+      return (SupportsFileSystemOperations) this;
+    }
+    throw new IllegalStateException("Doesn't support directory operations");
+  }
+
+  /**
+   * Return true if this tableIo support file trash and could recover file be deleted.
+   */
+  default boolean supportsFileRecycle() {
+    return false;
+  }
+
+  /**
+   * Return this cast to {@link SupportFileRecycleOperations} if it is.
+   */
+  default SupportFileRecycleOperations asFileRecycleIO() {
+    if (supportsFileRecycle()) {
+      return (SupportFileRecycleOperations) this;
+    }
+    throw new IllegalStateException("Doesn't support file recycle");
+  }
 }
