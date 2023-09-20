@@ -156,9 +156,9 @@ public class FlinkSink {
         MetricsGenerator metricsGenerator,
         String arcticEmitMode) {
       SingleOutputStreamOperator writerStream = input
-          .transform(ArcticWriter.class.getName(), TypeExtractor.createTypeInfo(WriteResult.class),
+          .transform("Sink: " + ArcticWriter.class.getName(), TypeExtractor.createTypeInfo(WriteResult.class),
               new ArcticWriter<>(logWriter, fileWriter, metricsGenerator))
-          .name(String.format("ArcticWriter %s(%s)", table.name(), arcticEmitMode))
+          .name(String.format("Sink: ArcticWriter %s(%s)", table.name(), arcticEmitMode))
           .setParallelism(writeOperatorParallelism);
 
       if (committer != null) {
